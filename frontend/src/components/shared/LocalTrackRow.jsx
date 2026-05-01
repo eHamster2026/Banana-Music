@@ -1,0 +1,85 @@
+import React from 'react'
+import { useTranslation } from 'react-i18next'
+import { fmtTime, formatTrackArtists, displayTrackTitle } from '../../api.js'
+import { useModal } from '../../contexts/ModalContext'
+import { useAuth } from '../../contexts/AuthContext'
+import CoverArt from './CoverArt'
+
+// When `num` is provided the row shows an ordered track number as the first column.
+const GRID_UNORDERED = '2fr 1fr 1fr 60px 44px 36px'
+const GRID_ORDERED   = '44px 2fr 1fr 1fr 60px 44px 36px'
+
+function getTrackColor(track) {
+  return track?.album?.art_color || track?.artist?.art_color || track?.art_color || 'art-1'
+}
+
+export default function LocalTrackRow({ track, num, contextIdx, isPlaying, onPlay, onLike, onRemove }) {
+  const { t } = useTranslation()
+  const { openAddToPlaylist } = useModal()
+  const { token } = useAuth()
+  const ordered = num !== undefined
+
+  const artistName = formatTrackArtists(track) || '─'
+  const albumTitle = track.album?.title  ?? track.album  ?? ''
+  const duration   = track.duration_sec  ?? track.duration ?? 0
+  const titleShown = displayTrackTitle(track)
+
+  return (
+    <div
+      className={`local-track-row${isPlaying ? ' now-playing' : ''}`}
+      style={ordered ? { gridTemplateColumns: GRID_ORDERED } : undefined}
+      onClick={onPlay}
+    >
+      {ordered && (
+        <div className="track-num" style={{ paddingRight: 14 }}>
+          {isPlaying
+            ? <svg viewBox="0 0 16 16" fill="currentColor" style={{ width: 12, height: 12 }}><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
+            : num}
+        </div>
+      )}
+      <div className="local-title-wrap">
+        <CoverArt
+          coverUrl={track.cover_url}
+          colorClass={getTrackColor(track)}
+          className="local-track-cover"
+          alt={`${titleShown} ${t('player.coverAlt')}`}
+        />
+        <div className="local-title">{titleShown}</div>
+      </div>
+      <div className="local-cell">{artistName}</div>
+      <div className="local-cell">{albumTitle}</div>
+      <div className="local-cell" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fmtTime(duration)}</div>
+      <button
+        className={`track-like-btn${track.is_liked ? ' liked' : ''}`}
+        onClick={e => { e.stopPropagation(); onLike && onLike() }}
+        title={track.is_liked ? t('common.unlikeTooltip') : t('common.likeTooltip')}
+      >
+        <svg viewBox="0 0 16 16" fill="currentColor">
+          <path d="M8 13.5a.75.75 0 01-.53-.22l-5.47-5.47a3.75 3.75 0 015.3-5.3L8 3.19l.7-.7a3.75 3.75 0 115.3 5.3L8.53 13.28A.75.75 0 018 13.5z"/>
+        </svg>
+      </button>
+      {onRemove ? (
+        <button
+          className="track-like-btn"
+          onClick={e => { e.stopPropagation(); onRemove() }}
+          title={t('playlist.removeFromPlaylist')}
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" style={{ width: 13, height: 13 }}>
+            <path d="M6.5 1.75a.25.25 0 01.25-.25h2.5a.25.25 0 01.25.25V3h-3V1.75zm4.5 0V3h2.25a.75.75 0 010 1.5H2.75a.75.75 0 010-1.5H5V1.75C5 .784 5.784 0 6.75 0h2.5C10.216 0 11 .784 11 1.75zM4.496 6.675a.75.75 0 10-1.492.15l.66 6.6A1.75 1.75 0 005.405 15h5.19a1.75 1.75 0 001.741-1.575l.66-6.6a.75.75 0 10-1.492-.15l-.66 6.6a.25.25 0 01-.249.225H5.405a.25.25 0 01-.249-.225l-.66-6.6z"/>
+          </svg>
+        </button>
+      ) : (
+        <button
+          className="track-like-btn"
+          onClick={e => { e.stopPropagation(); if (token) openAddToPlaylist(track.id) }}
+          title={t('playlist.addToPlaylist')}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor" style={{ width: 13, height: 13 }}>
+            <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm8-3.5a.75.75 0 01.75.75V7.5h2.25a.75.75 0 010 1.5H8.75v2.25a.75.75 0 01-1.5 0V9H5a.75.75 0 010-1.5h2.25V5.25A.75.75 0 018 4.5z"/>
+          </svg>
+        </button>
+      )}
+    </div>
+  )
+}

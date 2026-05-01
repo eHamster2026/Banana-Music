@@ -1,0 +1,51 @@
+services:
+
+  # ── 主应用 ────────────────────────────────────────────────────────────────────
+  banana-music:
+    build:
+      context: .
+      target: production
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      APP_ENV: production      # 禁用开发模式自动 schema 重置
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data       # 数据库与上传文件持久化
+      - ./plugins:/app/plugins # 挂载插件目录，宿主机可直接编辑 config.json
+    depends_on:
+      - ollama
+      - solara
+    restart: unless-stopped
+
+  # ── Solara 音乐代理（搜索/下载插件后端）─────────────────────────────────────
+  # 插件配置：plugins/solara/config.json → base_url 已设为 http://solara:3001
+  solara:
+    image: 1555904/solara-music:latest
+    ports:
+      - "${SOLARA_PORT:-3001}:3001"
+    restart: unless-stopped
+
+  # ── Ollama LLM 推理（llm-metadata 插件后端）──────────────────────────────────
+  # 插件配置：plugins/llm-metadata/config.json → ollama_base_url 改为 http://ollama:11434
+  # 首次启动后需拉取模型：docker compose exec ollama ollama pull qwen3.5:latest
+  #
+  # 如需 NVIDIA GPU 加速（需 nvidia-container-toolkit），取消注释 deploy 块：
+  # deploy:
+  #   resources:
+  #     reservations:
+  #       devices:
+  #         - driver: nvidia
+  #           count: all
+  #           capabilities: [gpu]
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama   # 模型文件持久化（避免每次重建重新拉取）
+    restart: unless-stopped
+
+volumes:
+  ollama-data:

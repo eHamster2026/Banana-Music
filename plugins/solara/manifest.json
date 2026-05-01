@@ -1,0 +1,28 @@
+{
+  "id": "solara",
+  "name": "Solara Music",
+  "version": "1.0.0",
+  "capabilities": ["search"],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "base_url": {
+        "type": "string",
+        "title": "服务地址",
+        "default": "http://172.24.245.77:3001"
+      },
+      "source": {
+        "type": "string",
+        "title": "音乐来源",
+        "enum": ["netease", "kuwo", "joox"],
+        "default": "netease"
+      },
+      "bitrate": {
+        "type": "string",
+        "title": "下载音质",
+        "enum": ["128", "192", "320", "flac"],
+        "default": "flac"
+      }
+    }
+  }
+}

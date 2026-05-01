@@ -1,0 +1,194 @@
+import i18n from './i18n'
+
+const API = (window.location.protocol !== 'file:' && window.location.hostname !== '')
+  ? '' : 'http://localhost:8000';
+
+export async function apiFetch(path, opts = {}, token = null) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (opts.headers) Object.assign(headers, opts.headers);
+  const res = await fetch(API + path, { ...opts, headers });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw Object.assign(new Error(err.detail || 'HTTP ' + res.status), { status: res.status });
+  }
+  return res.json();
+}
+
+// ── 上传流程（每文件独立并行流水线） ────────────────────────
+
+export const MAX_CONCURRENT_UPLOADS = 3
+
+/** 客户端计算文件原始字节的 SHA-256（与 Python hashlib.sha256 一致） */
+export async function computeFileHash(file) {
+  const buf = await file.arrayBuffer()
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf)
+  return Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('')
+}
+
+/**
+ * 按原始文件 hash 单条预检（每文件独立调用，不批量）。
+ * 返回 {exists, track_id?, title?}
+ */
+export function checkHash(fileHash, token) {
+  return apiFetch(`/tracks/check-hash?h=${fileHash}`, {}, token)
+}
+
+/**
+ * 上传单个文件。文件存盘后立即返回，处理（转码/hash/查重）在后台进行。
+ * 返回：{job_id}
+ * 用 pollUploadJob(job_id) 轮询结果，state=done 后再调用 createTrack。
+ */
+export function uploadSingleFile(file, fileHash, token) {
+  const form = new FormData()
+  form.append('file', file)
+  form.append('file_hash', fileHash)
+  return fetch(API + '/tracks/upload-file', {
+    method: 'POST',
+    body: form,
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
+}
+
+/**
+ * 查询上传任务状态（单次）。
+ * 返回：
+ *   {state: 'pending' | 'processing'}
+ *   {state: 'done', status: 'ok', file_key}
+ *   {state: 'done', status: 'duplicate', track_id, title}
+ *   {state: 'error', detail}
+ */
+export function getUploadStatus(jobId, token) {
+  return apiFetch(`/tracks/upload-status/${jobId}`, {}, token)
+}
+
+/**
+ * 轮询上传任务直到完成（state=done 或 error）。
+ * @param {string} jobId
+ * @param {string|null} token
+ * @param {{intervalMs?: number, timeoutMs?: number}} [opts]
+ * @returns {Promise<{state:'done', status:string, file_key?:string, track_id?:number, title?:string}>}
+ */
+export async function pollUploadJob(jobId, token, { intervalMs = 800, timeoutMs = 120_000 } = {}) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const s = await getUploadStatus(jobId, token)
+    if (s.state === 'done') return s
+    if (s.state === 'error') {
+      throw Object.assign(new Error(s.detail || i18n.t('upload.jobFailed')), { status: 422 })
+    }
+    await new Promise(r => setTimeout(r, intervalMs))
+  }
+  throw Object.assign(new Error(i18n.t('upload.jobTimeout')), { status: 408 })
+}
+
+export async function allSettledWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length)
+  let nextIndex = 0
+
+  async function runWorker() {
+    while (true) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      if (currentIndex >= items.length) return
+
+      try {
+        results[currentIndex] = {
+          status: 'fulfilled',
+          value: await worker(items[currentIndex], currentIndex),
+        }
+      } catch (reason) {
+        results[currentIndex] = {
+          status: 'rejected',
+          reason,
+        }
+      }
+    }
+  }
+
+  const workerCount = Math.max(1, Math.min(concurrency, items.length))
+  await Promise.all(Array.from({ length: workerCount }, runWorker))
+  return results
+}
+
+/**
+ * 根据 file_key 写库。服务端自动解析 Mutagen 标签作为初始元数据，
+ * 并 fire-and-forget 后台任务（指纹计算、LLM 标签清洗）。
+ * 返回 {status, track_id, title, artist, artists}
+ */
+export function createTrack(body, token) {
+  return apiFetch('/tracks/create', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, token)
+}
+
+export const API_BASE = API;
+
+/** 无内嵌标题时后端存空串，列表/播放器用曲目 id 占位（如 #66） */
+export function displayTrackTitle(track) {
+  if (!track) return ''
+  const raw = track.title != null ? String(track.title).trim() : ''
+  if (raw) return raw
+  if (track.id != null && track.id !== '') return `#${track.id}`
+  return ''
+}
+
+export function fmtTime(sec) {
+  const s = Math.floor(sec || 0);
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+/** 主艺人 + featured_artists（与后端 Track.featured_artists 语义一致），有序去重展示名 */
+export function getTrackArtistNames(track) {
+  if (!track) return []
+  const primary = typeof track.artist === 'string' ? track.artist : track.artist?.name
+  const seen = new Set()
+  const names = []
+  const push = (n) => {
+    const t = (n && String(n).trim()) || ''
+    if (!t || seen.has(t)) return
+    seen.add(t)
+    names.push(t)
+  }
+  push(primary)
+  for (const a of track.featured_artists || []) {
+    push(typeof a === 'string' ? a : a?.name)
+  }
+  return names
+}
+
+export function formatTrackArtists(track, sep = ' / ') {
+  return getTrackArtistNames(track).join(sep)
+}
+
+export function formatAlbumArtists(album, sep = ' / ') {
+  if (!album) return ''
+  const primary = typeof album.artist === 'string' ? album.artist : album.artist?.name
+  const seen = new Set()
+  const names = []
+  const push = (n) => {
+    const t = (n && String(n).trim()) || ''
+    if (!t || seen.has(t)) return
+    seen.add(t)
+    names.push(t)
+  }
+  push(primary)
+  for (const a of album.featured_artists || []) {
+    push(typeof a === 'string' ? a : a?.name)
+  }
+  return names.join(sep)
+}
+
+export function relTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - ts * 1000;
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return i18n.t('common.justNow');
+  if (m < 60) return i18n.t('common.minutesAgo', { count: m });
+  const h = Math.floor(m / 60);
+  if (h < 24) return i18n.t('common.hoursAgo', { count: h });
+  return i18n.t('common.daysAgo', { count: Math.floor(h / 24) });
+}

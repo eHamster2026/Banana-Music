@@ -1,0 +1,39 @@
+[project]
+name = "banana-music-backend"
+version = "0.1.0"
+description = "Banana Music FastAPI backend"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]>=0.29.0",
+    "sqlalchemy>=2.0.0",
+    "python-jose[cryptography]>=3.3.0",
+    "bcrypt>=4.0.0",
+    "python-multipart>=0.0.9",
+    "aiofiles>=23.0.0",
+    "mutagen>=1.47.0",
+    "soundfile>=0.12.0",
+    "numpy>=1.24.0",
+    "pyacoustid>=1.3.0",
+    "pydub>=0.25.0",
+    "email-validator>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "httpx>=0.27.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+]
+
+# 虚拟环境目录为 backend/venv（非 .venv）。请用仓库根目录的 `bash scripts/backend-sync.sh`，
+# 或在 backend 目录执行：`UV_PROJECT_ENVIRONMENT=venv uv sync`（相对路径相对本 pyproject 所在目录）。
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

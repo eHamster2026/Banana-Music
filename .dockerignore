@@ -1,0 +1,17 @@
+venv/
+backend/venv/
+__pycache__/
+*.py[cod]
+*.pyo
+backend/music.db
+backend/__pycache__/
+backend/routers/__pycache__/
+frontend/node_modules/
+# frontend/dist/ 需打入构建上下文，不能排除（docker build 前先 npm run build）
+resource/
+.git/
+.claude/
+.gitignore
+*.md
+.env
+.env.*

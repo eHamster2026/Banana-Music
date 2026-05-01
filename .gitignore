@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+.env
+
+# Data directory (database + uploads at project root)
+data/
+!data/.gitkeep
+
+# External reference materials (kept outside main repo history)
+reference/
+
+# Frontend build & deps
+frontend/node_modules/
+frontend/dist/
+
+# OS
+.DS_Store
+Thumbs.db
+.claude/*
+.codex
+.tmp-ape-test/*
+test-file/*

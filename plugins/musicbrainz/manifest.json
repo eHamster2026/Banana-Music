@@ -1,0 +1,34 @@
+{
+  "id": "musicbrainz",
+  "name": "MusicBrainz",
+  "version": "1.0.0",
+  "capabilities": ["metadata"],
+  "pipeline_stages": ["fingerprint_lookup", "info_lookup"],
+  "config_schema": {
+    "type": "object",
+    "properties": {
+      "acoustid_api_key": {
+        "type": "string",
+        "title": "AcoustID API Key（可选）",
+        "description": "在 https://acoustid.org/new-application 免费注册。留空时仍可进行指纹查询（使用官方文档示例 client，可能失效）；建议填写自有 key。AcoustID 全站建议 ≤3 次/秒，本插件统一按此限速。",
+        "default": ""
+      },
+      "user_agent": {
+        "type": "string",
+        "title": "User-Agent",
+        "description": "发送给 MusicBrainz 的 User-Agent，格式：AppName/Version (contact)",
+        "default": "BananaMusic/1.0 (banana-music-musicbrainz-plugin)"
+      },
+      "min_score_mb": {
+        "type": "number",
+        "title": "MusicBrainz 最低匹配分（0-100）",
+        "default": 70
+      },
+      "min_score_acoustid": {
+        "type": "number",
+        "title": "AcoustID 最低匹配分（0.0-1.0）",
+        "default": 0.6
+      }
+    }
+  }
+}
