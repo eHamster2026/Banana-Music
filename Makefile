@@ -1,9 +1,10 @@
-.PHONY: help install clean build test docker-build up down logs restart pull-model
+.PHONY: help install run clean build test docker-build up down logs restart pull-model
 
 # ── 默认目标 ──────────────────────────────────────────────────────────────────
 help:
 	@echo "常用目标："
 	@echo "  make install      安装后端（含 dev 依赖）与前端依赖"
+	@echo "  make run          启动本地开发栈（后端 :8000 + 前端 :5173）"
 	@echo "  make clean        清理本地开发依赖与构建产物"
 	@echo "  make build        编译前端到 frontend/dist/"
 	@echo "  make test         运行后端 pytest + 前端 Vitest"
@@ -18,6 +19,9 @@ help:
 install:
 	cd backend && UV_PROJECT_ENVIRONMENT=venv uv sync --extra dev
 	cd frontend && npm install
+
+run:
+	bash scripts/dev-local.sh stack
 
 clean:
 	rm -rf backend/venv
