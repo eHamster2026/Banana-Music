@@ -35,7 +35,7 @@ export default function LocalFilesView() {
     if (Number.isFinite(parsed)) {
       setTotalCount(parsed)
     }
-  }, [token, loadTotal])
+  }, [token])
 
   const loadPage = useCallback(async ({ initial = false, replace = false } = {}) => {
     if (loadingRef.current || (!replace && !hasMoreRef.current)) return
@@ -74,7 +74,7 @@ export default function LocalFilesView() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [token])
+  }, [token, loadTotal])
 
   // 首次加载：显示 spinner
   useEffect(() => {
