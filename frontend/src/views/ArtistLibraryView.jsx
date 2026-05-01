@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { apiFetch } from '../api.js'
 import ArtistCard from '../components/shared/ArtistCard'
+import useMainScrollPager from '../hooks/useMainScrollPager'
 
 const PAGE_SIZE = 100
 
@@ -17,7 +18,6 @@ export default function ArtistLibraryView() {
   const loadingRef = useRef(false)
   const hasMoreRef = useRef(true)
   const skipRef = useRef(0)
-  const sentinelRef = useRef(null)
 
   useEffect(() => {
     setTopbarTitle(t('artists.pageTitle'))
@@ -72,20 +72,7 @@ export default function ArtistLibraryView() {
     loadPage({ initial: true })
   }, [loadPage])
 
-  useEffect(() => {
-    const node = sentinelRef.current
-    if (!node || !hasMore) return
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries.some(entry => entry.isIntersecting)) {
-          loadPage()
-        }
-      },
-      { rootMargin: '360px 0px' },
-    )
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [hasMore, loadPage])
+  useMainScrollPager({ hasMore, onLoadMore: loadPage })
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /></div>
 
@@ -111,7 +98,7 @@ export default function ArtistLibraryView() {
           ))}
         </div>
       </div>
-      <div ref={sentinelRef} style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {loadingMore && <div className="spinner" />}
       </div>
       <div className="bottom-spacer" />

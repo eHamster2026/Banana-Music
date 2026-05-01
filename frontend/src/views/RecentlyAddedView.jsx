@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { apiFetch } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
+import useMainScrollPager from '../hooks/useMainScrollPager'
 
 const PAGE_SIZE = 100
 
@@ -23,7 +24,6 @@ export default function RecentlyAddedView() {
   const loadingRef = useRef(false)
   const hasMoreRef = useRef(true)
   const skipRef = useRef(0)
-  const sentinelRef = useRef(null)
 
   useEffect(() => {
     setTopbarTitle(t('recent.pageTitle'))
@@ -97,20 +97,7 @@ export default function RecentlyAddedView() {
     return () => window.removeEventListener('localFilesUpdated', silentRefresh)
   }, [silentRefresh])
 
-  useEffect(() => {
-    const node = sentinelRef.current
-    if (!node || !hasMore) return
-    const observer = new IntersectionObserver(
-      entries => {
-        if (entries.some(entry => entry.isIntersecting)) {
-          loadPage()
-        }
-      },
-      { rootMargin: '360px 0px' },
-    )
-    observer.observe(node)
-    return () => observer.disconnect()
-  }, [hasMore, loadPage])
+  useMainScrollPager({ hasMore, onLoadMore: loadPage })
 
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
@@ -170,7 +157,7 @@ export default function RecentlyAddedView() {
           />
         ))}
       </div>
-      <div ref={sentinelRef} style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ height: 56, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {loadingMore && <div className="spinner" />}
       </div>
       <div className="bottom-spacer" />
