@@ -10,6 +10,7 @@ from deps import get_db, get_optional_user
 import models
 import schemas
 from plugins.errors import PluginParseError, PluginUpstreamError
+from services.artist_names import UNKNOWN_ARTIST_NAMES
 from services.plugin_search import run_plugin_search_flat
 
 router = APIRouter(prefix="/search", tags=["Search"])
@@ -53,7 +54,12 @@ async def search(
         .filter(or_(models.Album.title.ilike(like), models.Album.id.in_(featured_album_ids)))
         .limit(8).all()
     )
-    artists = db.query(models.Artist).filter(models.Artist.name.ilike(like)).limit(6).all()
+    artists = (
+        db.query(models.Artist)
+        .filter(models.Artist.name.ilike(like), models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
+        .limit(6)
+        .all()
+    )
     playlists = db.query(models.Playlist).filter(models.Playlist.name.ilike(like)).limit(6).all()
 
     plugin_hits: list[schemas.PluginSearchHitOut] = []
@@ -81,6 +87,11 @@ async def search(
 def suggestions(q: str = Query(..., min_length=1), db: Session = Depends(get_db)):
     like = f"%{q}%"
     tracks = db.query(models.Track.title).filter(models.Track.title.ilike(like)).limit(5).all()
-    artists = db.query(models.Artist.name).filter(models.Artist.name.ilike(like)).limit(3).all()
+    artists = (
+        db.query(models.Artist.name)
+        .filter(models.Artist.name.ilike(like), models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
+        .limit(3)
+        .all()
+    )
     results = [r[0] for r in tracks] + [r[0] for r in artists]
     return {"suggestions": list(dict.fromkeys(results))[:8]}

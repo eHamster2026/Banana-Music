@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from deps import get_db
+from services.artist_names import UNKNOWN_ARTIST_NAMES
 import models, schemas
 
 router = APIRouter(prefix="/artists", tags=["Artists"])
@@ -14,13 +15,14 @@ def list_artists(
     db: Session = Depends(get_db)
 ):
     return db.query(models.Artist)\
+        .filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))\
         .order_by(models.Artist.monthly_listeners.desc(), models.Artist.id.desc())\
         .offset(skip).limit(limit).all()
 
 
 @router.get("/count")
 def count_artists(db: Session = Depends(get_db)):
-    return db.query(models.Artist).count()
+    return db.query(models.Artist).filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES)).count()
 
 
 @router.get("/{artist_id}", response_model=schemas.ArtistOut)

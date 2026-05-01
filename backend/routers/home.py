@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from deps import get_db, get_optional_user
+from services.artist_names import UNKNOWN_ARTIST_NAMES
 import models, schemas
 import random
 
@@ -31,6 +32,7 @@ def home(db: Session = Depends(get_db), user=Depends(get_optional_user)):
     featured = db.query(models.Playlist).filter(models.Playlist.is_featured == True).limit(6).all()
 
     top_artists = db.query(models.Artist)\
+        .filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))\
         .order_by(models.Artist.monthly_listeners.desc()).limit(8).all()
 
     local_tracks = db.query(models.Track)\

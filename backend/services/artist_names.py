@@ -9,6 +9,13 @@ from sqlalchemy.orm import Session
 import models
 
 
+UNKNOWN_ARTIST_NAMES = ("未知艺人", "Unknown Artist")
+
+
+def is_unknown_artist_name(name: str | None) -> bool:
+    return (name or "").strip() in UNKNOWN_ARTIST_NAMES
+
+
 def dedupe_artist_names(names: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []

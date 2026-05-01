@@ -20,6 +20,7 @@ from routers import (
     upload,
 )
 from plugins.errors import PluginParseError, PluginUpstreamError
+from services.artist_names import UNKNOWN_ARTIST_NAMES
 from services.plugin_search import run_plugin_search_flat
 
 
@@ -232,6 +233,7 @@ def get_artists(
 ):
     return (
         db.query(models.Artist)
+        .filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
         .order_by(models.Artist.monthly_listeners.desc(), models.Artist.id.desc())
         .offset(skip)
         .limit(limit)
@@ -241,7 +243,7 @@ def get_artists(
 
 @router.get("/getArtistCount")
 def get_artist_count(db: Session = Depends(get_db)):
-    return db.query(models.Artist).count()
+    return db.query(models.Artist).filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES)).count()
 
 
 @router.get("/getArtist", response_model=schemas.ArtistOut)
@@ -316,7 +318,12 @@ async def search3(
         .limit(8)
         .all()
     )
-    artists = db.query(models.Artist).filter(models.Artist.name.ilike(like)).limit(6).all()
+    artists = (
+        db.query(models.Artist)
+        .filter(models.Artist.name.ilike(like), models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
+        .limit(6)
+        .all()
+    )
     playlists = db.query(models.Playlist).filter(models.Playlist.name.ilike(like)).limit(6).all()
 
     plugin_hits: list[schemas.PluginSearchHitOut] = []
@@ -379,7 +386,9 @@ def _starred_albums(db: Session, user_id: int) -> list[models.Album]:
 def _starred_artists(db: Session, user_id: int) -> list[models.Artist]:
     entries = (
         db.query(models.UserLibraryArtist)
+        .join(models.Artist, models.Artist.id == models.UserLibraryArtist.artist_id)
         .filter(models.UserLibraryArtist.user_id == user_id)
+        .filter(models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
         .order_by(models.UserLibraryArtist.artist_id.desc())
         .all()
     )

@@ -10,6 +10,7 @@ async def test_list_artists_default_includes_more_than_legacy_page_size(client):
     try:
         for i in range(25):
             db.add(models.Artist(name=f"Artist {i}", art_color="art-1"))
+        db.add(models.Artist(name="未知艺人", art_color="art-1"))
         db.commit()
     finally:
         db.close()
@@ -17,6 +18,11 @@ async def test_list_artists_default_includes_more_than_legacy_page_size(client):
     r = await client.get("/rest/getArtists")
     assert r.status_code == 200
     assert len(r.json()) == 25
+    assert all(item["name"] != "未知艺人" for item in r.json())
+
+    count = await client.get("/rest/getArtistCount")
+    assert count.status_code == 200
+    assert count.json() == 25
 
 
 @pytest.mark.asyncio
