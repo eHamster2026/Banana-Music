@@ -68,7 +68,7 @@ CREATE TABLE tracks (
   stream_url        VARCHAR(500),
   created_at        INTEGER,
   file_hash         BLOB,
-  audio_hash        BLOB,
+  audio_hash        BLOB NOT NULL,  -- PCM MD5，16 字节
   audio_fingerprint BLOB
 );
 
@@ -156,7 +156,7 @@ CREATE TABLE fingerprint_tasks (
 -- ── 上传：暂存（upload-file → create）与 parse_upload 任务队列 ───
 CREATE TABLE upload_staging (
   file_key      VARCHAR NOT NULL PRIMARY KEY,
-  audio_hash    BLOB,
+  audio_hash    BLOB NOT NULL, -- PCM MD5，16 字节
   original_name VARCHAR NOT NULL,
   duration_sec  INTEGER,
   created_at    INTEGER
@@ -219,18 +219,18 @@ CREATE INDEX ix_banners_id ON banners (id);
 
 | 主题 | 说明 |
 |------|------|
-| 权威源码 | `backend/models.py`；版本号 `backend/schema_version.py`（`SCHEMA_VERSION`）；启动迁移 `backend/main.py`（`create_all`、列/索引补丁）。 |
-| 版本管理 | 版本历史写入 `schema_migrations` 表（v0.11 起），**`version` 为整数**（与 `SCHEMA_VERSION` 一致），替代原 `data/schema_version` 文件，避免文件与库不一致。 |
+| 权威源码 | `backend/models.py`；版本号 `backend/schema_version.py`（`SCHEMA_VERSION`）；启动检查 `backend/main.py`（仅空库初始化，不自动迁移）。 |
+| 版本管理 | 版本历史写入 `schema_migrations` 表（v0.11 起），**`version` 为整数**（与 `SCHEMA_VERSION` 一致），替代原 `data/schema_version` 文件。版本不匹配时应用直接启动失败，必须手动迁移或手动 reset。 |
 | 库文件 | 默认 `sqlite:///music.db` → 实际文件 **`data/music.db`**（相对路径相对仓库根，见 `database.py`）。 |
 | WAL | 连接后由应用执行 `PRAGMA journal_mode=WAL` 等，**不在上表内**。 |
 | `file_hash` | 原始文件字节摘要 BLOB，用于上传前预检去重。 |
-| `audio_hash` | 格式无关音频摘要 BLOB，**全局唯一**；历史长度变更见 `schema_version.py` 注释。 |
+| `audio_hash` | 格式无关音频摘要 BLOB，PCM MD5（16 字节），NOT NULL，**全局唯一**；历史长度变更见 `schema_version.py` 注释。 |
 | `audio_fingerprint` | Chromaprint 指纹，后台任务写入。 |
 | 多艺人 | `track_artists` / `album_artists` 存储 featured 等额外参与艺人；主艺人仍由 `tracks.artist_id` / `albums.artist_id` 指向。API 响应中以 `featured_artists` 字段暴露。搜索接口同时匹配 featured 艺人名。 |
 | 歌单唯一 | `uq_playlists_user_id_lower_name`：`user_id` 非空时 `(user_id, lower(name))` 唯一；`user_id IS NULL` 的系统歌单不参与；冲突 API **409**。 |
-| 老库补索引 | 若缺 `uq_playlists_user_id_lower_name`，`main.py` 会执行与上表等价的 `CREATE UNIQUE INDEX ... WHERE user_id IS NOT NULL`。 |
-| `play_queues.updated_at` | v0.11 由 FLOAT 改为 INTEGER Unix 秒；`position_sec` 为播放进度保持 FLOAT。迁移时执行 `CAST(ROUND(updated_at) AS INTEGER)`。 |
-| `user_library_*.added_at` | v0.11 移除；SQLite ≥ 3.35 时迁移脚本执行 `ALTER TABLE ... DROP COLUMN`，旧版本保留该列（ORM 忽略）。列表排序改为按主键 id 降序。 |
+| 老库补索引 | 若缺 `uq_playlists_user_id_lower_name`，需手动执行与上表等价的 `CREATE UNIQUE INDEX ... WHERE user_id IS NOT NULL`。 |
+| `play_queues.updated_at` | v0.11 由 FLOAT 改为 INTEGER Unix 秒；`position_sec` 为播放进度保持 FLOAT。老库需手动执行 `CAST(ROUND(updated_at) AS INTEGER)` 迁移。 |
+| `user_library_*.added_at` | v0.11 移除；列表排序改为按主键 id 降序。旧库如仍保留该列，需手动迁移，ORM 会忽略它。 |
 | 测试库 | `BANANA_TESTING=true` 时使用内存 SQLite，不写入 `schema_migrations`。 |
 
-**维护**：改表结构时先改 `models.py` 与迁移逻辑，再更新本节 SQL（可用仓库内 `uv run python` 调用 `CreateTable`/`CreateIndex` 对 `Base.metadata` 重新导出校对）。
+**维护**：改表结构时先改 `models.py`、递增 `SCHEMA_VERSION` 并准备人工迁移方案，再更新本节 SQL（可用仓库内 `uv run python` 调用 `CreateTable`/`CreateIndex` 对 `Base.metadata` 重新导出校对）。

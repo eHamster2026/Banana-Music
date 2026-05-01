@@ -108,8 +108,8 @@ class Track(Base):
     created_at = Column(Integer, default=utcnow)
     # SHA-256 of raw file bytes — client-computable, used for pre-upload dedup check
     file_hash = Column(LargeBinary(32), nullable=True, index=True)
-    # SHA-256 of decoded raw PCM (float32 LE) — format-invariant, used for dedup
-    audio_hash = Column(LargeBinary(32), unique=True, nullable=True, index=True)
+    # MD5 of decoded PCM — format-invariant, used for dedup
+    audio_hash = Column(LargeBinary(16), unique=True, nullable=False, index=True)
     # Chromaprint fingerprint bytes — computed by background worker
     audio_fingerprint = Column(LargeBinary, nullable=True)
 
@@ -307,7 +307,7 @@ class UploadStaging(Base):
     __tablename__ = "upload_staging"
 
     file_key      = Column(String,       primary_key=True)  # hash_hex + extension
-    audio_hash    = Column(LargeBinary,  nullable=True)      # PCM MD5，16 字节；None 表示计算失败
+    audio_hash    = Column(LargeBinary(16), nullable=False)  # PCM MD5，16 字节
     original_name = Column(String,       nullable=False)     # 原始文件名（含扩展名）
     duration_sec  = Column(Integer,      default=0)
     created_at    = Column(Integer,      default=utcnow)

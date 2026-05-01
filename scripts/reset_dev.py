@@ -2,7 +2,7 @@
 scripts/reset_dev.py
 
 Clears all dev data: SQLite database + uploaded audio resources + cover images.
-Called automatically by main.py on schema version mismatch, or run manually.
+Run manually only; main.py never calls this automatically.
 
 Production guard: exits immediately if APP_ENV=production.
 """

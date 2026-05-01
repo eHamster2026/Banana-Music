@@ -14,7 +14,7 @@ def _stage_upload(file_key: str, tmp_path):
         db.add(
             models.UploadStaging(
                 file_key=file_key,
-                audio_hash=b"audio-hash-" + file_key[:4].encode("ascii"),
+                audio_hash=(b"audio-hash-" + file_key[:4].encode("ascii")).ljust(16, b"-"),
                 original_name="Artist - Title.flac",
                 duration_sec=123,
             )

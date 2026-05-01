@@ -157,16 +157,25 @@ async def _process_upload_job(loop: asyncio.AbstractEventLoop, job: _UploadJob) 
     file_hash_hex = job.save_path.stem           # save_path = RESOURCE_DIR / (hash + suffix)
     file_key      = file_hash_hex + final_suffix  # 转码后可能由 .ape/.wav → .flac
     audio_hash    = result["audio_hash"]
+    if audio_hash is None:
+        (RESOURCE_DIR / file_key).unlink(missing_ok=True)
+        _app_log.error(
+            "上传文件无法入库：audio_hash 计算失败 original_name=%s final_path=%s",
+            job.original_name,
+            RESOURCE_DIR / file_key,
+        )
+        job.state = "error"
+        job.error_detail = "无法计算音频内容 hash，无法入库"
+        return
 
     db = SessionLocal()
     try:
-        if audio_hash:
-            dup = db.query(models.Track).filter(models.Track.audio_hash == audio_hash).first()
-            if dup:
-                (RESOURCE_DIR / file_key).unlink(missing_ok=True)
-                job.state  = "done"
-                job.result = {"status": "duplicate", "track_id": dup.id, "title": dup.title}
-                return
+        dup = db.query(models.Track).filter(models.Track.audio_hash == audio_hash).first()
+        if dup:
+            (RESOURCE_DIR / file_key).unlink(missing_ok=True)
+            job.state  = "done"
+            job.result = {"status": "duplicate", "track_id": dup.id, "title": dup.title}
+            return
 
         staging = models.UploadStaging(
             file_key=file_key,
@@ -650,14 +659,23 @@ def _compute_pcm_md5(filepath: Path) -> bytes | None:
         import soundfile as sf
         data, _ = sf.read(str(filepath), always_2d=True)
         return hashlib.md5(data.astype("float32").tobytes()).digest()
-    except Exception:
+    except Exception as soundfile_exc:
         pass
     try:
         from pydub import AudioSegment
         seg = AudioSegment.from_file(str(filepath))
         raw = seg.set_channels(2).set_sample_width(4).raw_data
         return hashlib.md5(raw).digest()
-    except Exception:
+    except Exception as pydub_exc:
+        _app_log.error(
+            "无法计算 audio_hash: path=%s soundfile_error=%s: %s pydub_error=%s: %s",
+            filepath,
+            type(soundfile_exc).__name__,
+            soundfile_exc,
+            type(pydub_exc).__name__,
+            pydub_exc,
+            exc_info=True,
+        )
         return None
 
 
@@ -673,7 +691,11 @@ def _compute_audio_hash(filepath: Path) -> bytes | None:
         md5 = _read_flac_md5(filepath)
         if md5:
             return md5
-    return _compute_pcm_md5(filepath)
+    md5 = _compute_pcm_md5(filepath)
+    if md5 is not None and len(md5) != 16:
+        _app_log.error("audio_hash 长度异常: path=%s length=%s", filepath, len(md5))
+        return None
+    return md5
 
 
 # ── 无损转码 ─────────────────────────────────────────────────
@@ -1168,7 +1190,9 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
         raise HTTPException(404, "文件不存在，请重新上传")
 
     # ── 读取暂存数据 ───────────────────────────────────────────
-    audio_hash_bytes: bytes | None = staging.audio_hash
+    audio_hash_bytes: bytes = staging.audio_hash
+    if audio_hash_bytes is None:
+        raise HTTPException(500, "上传记录缺少 audio_hash，请重新上传")
     duration:         int          = staging.duration_sec or 0
     original_name:    str          = staging.original_name
     filename_stem:    str          = Path(original_name).stem
@@ -1205,12 +1229,11 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
     # ── 串行写库 ──────────────────────────────────────────────
     async with _get_write_lock():
         # 二次查重（并发上传同文件时的安全兜底）
-        if audio_hash_bytes:
-            dup = db.query(models.Track).filter(models.Track.audio_hash == audio_hash_bytes).first()
-            if dup:
-                db.delete(staging)
-                db.commit()
-                return {"status": "duplicate", "track_id": dup.id, "title": dup.title}
+        dup = db.query(models.Track).filter(models.Track.audio_hash == audio_hash_bytes).first()
+        if dup:
+            db.delete(staging)
+            db.commit()
+            return {"status": "duplicate", "track_id": dup.id, "title": dup.title}
 
         album_owner_name = album_artist or names[0]
         primary   = _get_or_create_artist(db, names[0])

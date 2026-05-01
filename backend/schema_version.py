@@ -1,6 +1,6 @@
 # 每次破坏性 schema 变更时递增此整数。
 # main.py 将 DB 中最新版本号与 SCHEMA_VERSION 比较；
-# 开发环境不匹配时触发 reset_dev.py；生产环境仅追加迁移记录并跑列迁移。
+# 任何环境版本不匹配都会直接启动失败；必须手动迁移或手动 reset。
 #
 # History:
 #    1  initial schema
@@ -20,5 +20,6 @@
 #   13  tracks.track_number 语义修正：0 → NULL，default=NULL（编号不明）
 #   14  parse_upload_tasks 表（parse_upload 任务持久化，替代 fire-and-forget asyncio.create_task）
 #   15  schema_migrations.version 列类型 String → Integer
+#   16  audio_hash ORM 定义修正为 PCM MD5（16 B），并设为 NOT NULL
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16

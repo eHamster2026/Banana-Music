@@ -97,11 +97,11 @@ cd ../frontend && npm run test
 **每次修改数据库结构都必须：**
 
 1. 在 `schema_version.py` 中递增 `SCHEMA_VERSION`，并在注释里记录变更内容
-2. 在 `main.py` 的 `_conn.execute(INSERT OR IGNORE ...)` 处更新 description 字符串
-3. 新增**表**：只需在 `models.py` 加 `class`，`create_all` 启动时自动建表
-4. 新增/删除**列**：在 `main.py` 的 `_migrate_columns()` 里加 `ALTER TABLE` 语句（生产环境无法自动 reset，必须显式迁移）
+2. 在 `main.py` 的 `SCHEMA_DESCRIPTION` 更新对应描述
+3. 新增**表**：在 `models.py` 加 `class`；仅全新空库启动时 `create_all` 自动建表
+4. 新增/删除/修改**列或约束**：必须提供人工迁移方案；应用启动时不自动迁移
 
-开发环境版本不匹配时 `main.py` 会自动调用 `scripts/reset_dev.py` 重建数据库。
+任何环境版本不匹配时 `main.py` 都会直接报错退出，不会自动删库、重建或执行迁移。需要开发者先手动备份并迁移，或明确手动运行 `scripts/reset_dev.py`。
 
 ### DB Session 使用
 

@@ -976,6 +976,42 @@ def _auth_headers(api_key: Optional[str], token: Optional[str]) -> dict[str, str
     return {}
 
 
+async def check_remote_duplicate_by_file_hash(
+    path: Path,
+    *,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    request_timeout: float,
+) -> Optional[dict]:
+    try:
+        import httpx
+    except ImportError:
+        raise RuntimeError("请安装 httpx: pip install httpx")
+
+    base_url = base_url.rstrip("/")
+    headers = _auth_headers(api_key, token)
+    file_hash = _sha256_file(path)
+
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        logging.info("[%s] 上传前远端预检重复...", path.name)
+        r = await client.get(f"{base_url}/tracks/check-hash", params={"h": file_hash})
+        r.raise_for_status()
+        check = r.json()
+
+    if not check.get("exists"):
+        return None
+
+    track_id = check.get("track_id")
+    logging.info("[%s] 远端已存在，track_id=%s，跳过本地处理", path.name, track_id)
+    return {
+        "file": str(path),
+        "status": "duplicate",
+        "track_id": track_id,
+        "title": check.get("title"),
+    }
+
+
 async def upload_file_to_backend(
     path: Path,
     *,
@@ -1188,6 +1224,29 @@ async def _run_process(args: argparse.Namespace) -> None:
         upload_token = await resolve_upload_token(args) if args.upload else args.token
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             logging.info("─── 处理: %s", path)
+            if args.upload:
+                try:
+                    duplicate = await check_remote_duplicate_by_file_hash(
+                        path,
+                        base_url=args.base_url,
+                        api_key=args.api_key,
+                        token=upload_token,
+                        request_timeout=args.request_timeout,
+                    )
+                except Exception as exc:
+                    _log_unhandled_exception(f"[{path}] 上传前远端预检失败", exc)
+                    results.append({"file": str(path), "status": "error", "detail": str(exc)})
+                    continue
+                if duplicate:
+                    results.append({
+                        "file": str(path),
+                        "converted": None,
+                        "final_file": str(path),
+                        "llm_result": None,
+                        "upload_result": duplicate,
+                    })
+                    continue
+
             result = await process_file(
                 path,
                 effective_output_dir,
@@ -1229,6 +1288,17 @@ async def _run_upload(args: argparse.Namespace) -> None:
         tmp_dir = Path(tmp)
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             try:
+                duplicate = await check_remote_duplicate_by_file_hash(
+                    path,
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    token=upload_token,
+                    request_timeout=args.request_timeout,
+                )
+                if duplicate:
+                    results.append(duplicate)
+                    continue
+
                 dst = tmp_dir / path.name
                 counter = 1
                 while dst.exists():
