@@ -10,6 +10,7 @@ export default function AlbumLibraryView() {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
   const [albums, setAlbums] = useState([])
+  const [totalCount, setTotalCount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -22,6 +23,14 @@ export default function AlbumLibraryView() {
     setTopbarTitle(t('albums.pageTitle'))
   }, [t, setTopbarTitle])
 
+  const loadTotal = useCallback(async () => {
+    const count = await apiFetch('/albums/count')
+    const parsed = Number(count)
+    if (Number.isFinite(parsed)) {
+      setTotalCount(parsed)
+    }
+  }, [])
+
   const loadPage = useCallback(async ({ initial = false } = {}) => {
     if (loadingRef.current || !hasMoreRef.current) return
     loadingRef.current = true
@@ -29,6 +38,9 @@ export default function AlbumLibraryView() {
     else setLoadingMore(true)
 
     try {
+      if (initial) {
+        await loadTotal()
+      }
       const data = await apiFetch(`/albums?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
       const page = Array.isArray(data) ? data : []
       setAlbums(prev => {
@@ -54,7 +66,7 @@ export default function AlbumLibraryView() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [])
+  }, [loadTotal])
 
   useEffect(() => {
     loadPage({ initial: true })
@@ -90,7 +102,7 @@ export default function AlbumLibraryView() {
     <div>
       <div style={{ padding: '24px 28px 16px' }}>
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px', marginBottom: 4 }}>{t('albums.pageTitle')}</div>
-        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('albums.count', { count: albums.length })}</div>
+        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('albums.count', { count: totalCount ?? albums.length })}</div>
       </div>
       <div style={{ padding: '0 28px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 20 }}>

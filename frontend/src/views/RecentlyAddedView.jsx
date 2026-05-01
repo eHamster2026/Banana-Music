@@ -16,6 +16,7 @@ export default function RecentlyAddedView() {
   const { token } = useAuth()
   const { showToast } = useToast()
   const [tracks, setTracks] = useState([])
+  const [totalCount, setTotalCount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -28,6 +29,14 @@ export default function RecentlyAddedView() {
     setTopbarTitle(t('recent.pageTitle'))
   }, [t, setTopbarTitle])
 
+  const loadTotal = useCallback(async () => {
+    const count = await apiFetch('/tracks/count', {}, token)
+    const parsed = Number(count)
+    if (Number.isFinite(parsed)) {
+      setTotalCount(parsed)
+    }
+  }, [token, loadTotal])
+
   const loadPage = useCallback(async ({ initial = false, replace = false } = {}) => {
     if (loadingRef.current || (!replace && !hasMoreRef.current)) return
     loadingRef.current = true
@@ -36,6 +45,9 @@ export default function RecentlyAddedView() {
 
     const skip = replace ? 0 : skipRef.current
     try {
+      if (replace) {
+        await loadTotal()
+      }
       const data = await apiFetch(`/tracks?sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
       const page = Array.isArray(data) ? data : []
       setTracks(prev => {
@@ -127,7 +139,7 @@ export default function RecentlyAddedView() {
     <div>
       <div style={{ padding: '28px 28px 16px' }}>
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px', marginBottom: 4 }}>{t('recent.pageTitle')}</div>
-        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{t('common.trackCount', { count: tracks.length })}</div>
+        <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{t('common.trackCount', { count: totalCount ?? tracks.length })}</div>
         <div className="detail-actions" style={{ marginBottom: 4 }}>
           <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
