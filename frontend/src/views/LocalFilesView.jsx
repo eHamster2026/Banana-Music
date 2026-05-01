@@ -16,7 +16,6 @@ export default function LocalFilesView() {
   const { token } = useAuth()
   const { showToast } = useToast()
   const [tracks, setTracks] = useState([])
-  const [totalCount, setTotalCount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -29,14 +28,6 @@ export default function LocalFilesView() {
     setTopbarTitle(t('songs.pageTitle'))
   }, [t, setTopbarTitle])
 
-  const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/tracks/count?local=true', {}, token)
-    const parsed = Number(count)
-    if (Number.isFinite(parsed)) {
-      setTotalCount(parsed)
-    }
-  }, [token, loadTotal])
-
   const loadPage = useCallback(async ({ initial = false, replace = false } = {}) => {
     if (loadingRef.current || (!replace && !hasMoreRef.current)) return
     loadingRef.current = true
@@ -45,9 +36,6 @@ export default function LocalFilesView() {
 
     const skip = replace ? 0 : skipRef.current
     try {
-      if (replace) {
-        await loadTotal()
-      }
       const data = await apiFetch(`/tracks?local=true&sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
       const page = Array.isArray(data) ? data : []
       setTracks(prev => {
@@ -149,7 +137,7 @@ export default function LocalFilesView() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 28px 8px' }}>
-        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('common.trackCount', { count: totalCount ?? tracks.length })}</div>
+        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('common.trackCount', { count: tracks.length })}</div>
         <button className="btn-secondary" style={{ padding: '7px 16px', fontSize: 13 }} onClick={openFileInput}>
           {t('songs.addFileBtn')}
         </button>

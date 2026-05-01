@@ -21,11 +21,6 @@ def list_albums(
     return q.offset(skip).limit(limit).all()
 
 
-@router.get("/count")
-def count_albums(db: Session = Depends(get_db)):
-    return db.query(models.Album).count()
-
-
 @router.get("/{album_id}", response_model=schemas.AlbumDetail)
 def get_album(album_id: int, db: Session = Depends(get_db)):
     album = (

@@ -18,11 +18,6 @@ def list_artists(
         .offset(skip).limit(limit).all()
 
 
-@router.get("/count")
-def count_artists(db: Session = Depends(get_db)):
-    return db.query(models.Artist).count()
-
-
 @router.get("/{artist_id}", response_model=schemas.ArtistOut)
 def get_artist(artist_id: int, db: Session = Depends(get_db)):
     artist = db.query(models.Artist).filter(models.Artist.id == artist_id).first()

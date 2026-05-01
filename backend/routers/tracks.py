@@ -24,17 +24,6 @@ def list_tracks(
     return q.offset(skip).limit(limit).all()
 
 
-@router.get("/count")
-def count_tracks(
-    local: bool = Query(False),
-    db: Session = Depends(get_db),
-):
-    q = db.query(models.Track)
-    if local:
-        q = q.filter(models.Track.stream_url.like("/resource/%"))
-    return q.count()
-
-
 @router.get("/{track_id}", response_model=schemas.TrackDetail)
 def get_track(track_id: int, db: Session = Depends(get_db)):
     track = db.query(models.Track).filter(models.Track.id == track_id).first()

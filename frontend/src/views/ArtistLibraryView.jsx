@@ -10,7 +10,6 @@ export default function ArtistLibraryView() {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
   const [artists, setArtists] = useState([])
-  const [totalCount, setTotalCount] = useState(null)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -23,14 +22,6 @@ export default function ArtistLibraryView() {
     setTopbarTitle(t('artists.pageTitle'))
   }, [t, setTopbarTitle])
 
-  const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/artists/count')
-    const parsed = Number(count)
-    if (Number.isFinite(parsed)) {
-      setTotalCount(parsed)
-    }
-  }, [])
-
   const loadPage = useCallback(async ({ initial = false } = {}) => {
     if (loadingRef.current || !hasMoreRef.current) return
     loadingRef.current = true
@@ -38,9 +29,6 @@ export default function ArtistLibraryView() {
     else setLoadingMore(true)
 
     try {
-      if (initial) {
-        await loadTotal()
-      }
       const data = await apiFetch(`/artists?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
       const page = Array.isArray(data) ? data : []
       setArtists(prev => {
@@ -66,7 +54,7 @@ export default function ArtistLibraryView() {
       setLoading(false)
       setLoadingMore(false)
     }
-  }, [loadTotal])
+  }, [])
 
   useEffect(() => {
     loadPage({ initial: true })
@@ -102,7 +90,7 @@ export default function ArtistLibraryView() {
     <div>
       <div style={{ padding: '24px 28px 16px' }}>
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px', marginBottom: 4 }}>{t('artists.pageTitle')}</div>
-        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('artists.count', { count: totalCount ?? artists.length })}</div>
+        <div style={{ fontSize: 14, color: 'var(--text-secondary)' }}>{t('artists.count', { count: artists.length })}</div>
       </div>
       <div style={{ padding: '0 28px' }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 24 }}>
