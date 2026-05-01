@@ -50,7 +50,9 @@ banana-music/
 
 ```bash
 # 后端依赖（uv）
-bash scripts/backend-sync.sh
+cd backend
+UV_PROJECT_ENVIRONMENT=venv uv sync
+cd ..
 
 # 前端依赖
 cd frontend && npm install
@@ -78,13 +80,12 @@ bash scripts/dev-local.sh serve     # uvicorn 托管已构建的 dist/（接近�
 
 ```bash
 # 后端依赖含测试工具
-bash scripts/backend-sync.sh --extra dev
-
-# 后端
-cd backend && UV_PROJECT_ENVIRONMENT=venv uv run python -m pytest tests/ -x -q
+cd backend
+UV_PROJECT_ENVIRONMENT=venv uv sync --extra dev
+UV_PROJECT_ENVIRONMENT=venv uv run python -m pytest tests/ -x -q
 
 # 前端
-cd frontend && npm run test
+cd ../frontend && npm run test
 ```
 
 ---

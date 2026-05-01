@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 本地开发：不经过 Docker / act。日常最快用法是「后端 + Vite 双终端」，无需每次 production build。
-# 首次请执行：bash scripts/backend-sync.sh
-# 前端首次请：cd frontend && npm install（或 npm ci）
+# 首次后端请执行：cd backend && UV_PROJECT_ENVIRONMENT=venv uv sync --extra dev
+# 首次前端请：cd frontend && npm install（或 npm ci）
 
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -13,7 +13,7 @@ usage() {
   cat <<'EOF'
 本地开发：不经过 Docker / act。日常最快：两个终端分别 backend + frontend（Vite 热更新，无需每次 build）。
 
-首次后端依赖: bash scripts/backend-sync.sh
+首次后端依赖: cd backend && UV_PROJECT_ENVIRONMENT=venv uv sync --extra dev
 首次前端依赖: cd frontend && npm install
 
 子命令:

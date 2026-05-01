@@ -1,9 +1,10 @@
-.PHONY: help install build test docker-build up down logs restart pull-model
+.PHONY: help install clean build test docker-build up down logs restart pull-model
 
 # ── 默认目标 ──────────────────────────────────────────────────────────────────
 help:
 	@echo "常用目标："
 	@echo "  make install      安装后端（含 dev 依赖）与前端依赖"
+	@echo "  make clean        清理本地开发依赖与构建产物"
 	@echo "  make build        编译前端到 frontend/dist/"
 	@echo "  make test         运行后端 pytest + 前端 Vitest"
 	@echo "  make docker-build 编译前端并构建 banana-music Docker 镜像"
@@ -15,8 +16,13 @@ help:
 
 # ── 开发环境 ──────────────────────────────────────────────────────────────────
 install:
-	bash scripts/backend-sync.sh --extra dev
+	cd backend && UV_PROJECT_ENVIRONMENT=venv uv sync --extra dev
 	cd frontend && npm install
+
+clean:
+	rm -rf backend/venv
+	rm -rf frontend/node_modules frontend/dist frontend/.vite
+	rm -rf backend/.pytest_cache backend/.ruff_cache
 
 # ── 前端编译 ─────────────────────────────────────────────────────────────────
 build:
