@@ -48,6 +48,20 @@ LOSSLESS_EXTS = frozenset({".ape", ".flac", ".wav", ".wma"})
 SUPPORTED_EXTS = frozenset({".flac", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".ape", ".wma"})
 
 
+def _log_unhandled_exception(context: str, exc: BaseException) -> None:
+    logging.error("%s: %s", context, exc, exc_info=True)
+    cause = exc.__cause__ or exc.__context__
+    if cause:
+        chain = []
+        visited = set()
+        cur = cause
+        while cur and id(cur) not in visited:
+            visited.add(id(cur))
+            chain.append(f"{type(cur).__name__}: {cur}")
+            cur = cur.__cause__ or cur.__context__
+        logging.error("  原因链: %s", " -> ".join(chain))
+
+
 def _is_same_path(a: Path, b: Path) -> bool:
     try:
         return a.resolve() == b.resolve()
@@ -797,7 +811,7 @@ async def clean_file(path: Path, ollama_url: str, model: str, timeout: float) ->
     try:
         result = await _llm_clean(path.stem, raw_tags, ollama_url, model, timeout)
     except Exception as exc:
-        logging.warning("[%s] LLM 失败: %s", path.stem, exc)
+        _log_unhandled_exception(f"[{path.stem}] LLM 失败", exc)
         result = None
 
     if result:
@@ -930,7 +944,7 @@ async def process_file(
         try:
             llm = await _llm_clean(final_path.stem, raw_tags, ollama_url, ollama_model, ollama_timeout)
         except Exception as exc:
-            logging.warning("[%s] LLM 失败: %s", final_path.stem, exc)
+            _log_unhandled_exception(f"[{final_path.stem}] LLM 失败", exc)
             llm = None
 
         if llm:
@@ -1199,7 +1213,7 @@ async def _run_process(args: argparse.Namespace) -> None:
                         request_timeout=args.request_timeout,
                     )
                 except Exception as exc:
-                    logging.warning("[%s] 上传失败: %s", result["final_file"], exc)
+                    _log_unhandled_exception(f"[{result['final_file']}] 上传失败", exc)
                     result["upload_result"] = {"status": "error", "detail": str(exc)}
             results.append(result)
     finally:
@@ -1227,7 +1241,7 @@ async def _run_upload(args: argparse.Namespace) -> None:
                 try:
                     llm = await _llm_clean(dst.stem, raw_tags, args.ollama_url.rstrip("/"), args.model, args.timeout)
                 except Exception as exc:
-                    logging.warning("[%s] LLM 失败，跳过上传: %s", path.stem, exc)
+                    _log_unhandled_exception(f"[{path.stem}] LLM 失败，跳过上传", exc)
                     results.append({"file": str(path), "status": "skipped", "detail": "LLM解析失败"})
                     continue
 
@@ -1254,7 +1268,7 @@ async def _run_upload(args: argparse.Namespace) -> None:
                 )
                 results.append({"source_file": str(path), "llm_result": asdict(llm), **uploaded})
             except Exception as exc:
-                logging.warning("[%s] 上传失败: %s", path, exc)
+                _log_unhandled_exception(f"[{path}] 上传失败", exc)
                 results.append({"file": str(path), "status": "error", "detail": str(exc)})
 
     ok = sum(1 for r in results if r.get("status") == "added")

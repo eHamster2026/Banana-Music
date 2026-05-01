@@ -178,6 +178,12 @@ plugins/<id>/
 
 详见 `docs/plugin-api.md` 第 11 节。
 
+### 脚本与批量工具日志规范（新增）
+
+- 对于未显式处理的异常，必须记录完整上下文和堆栈，不要只打印 `str(exc)`。
+- 优先使用 `logging.error(..., exc_info=True)`，并补充 `__cause__/__context__` 的原因链，避免出现只显示 `All connection attempts failed` 这类不充分提示。
+- 涉及上传/LLM 清洗/网络请求的关键流程，建议在 `except Exception` 分支统一调用同一日志函数，确保能定位是连接、认证、DNS 还是代理层失败。
+
 ---
 
 ## 前端关键约定
