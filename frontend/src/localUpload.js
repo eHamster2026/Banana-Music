@@ -1,8 +1,6 @@
 import {
   allSettledWithConcurrency,
   MAX_CONCURRENT_UPLOADS,
-  computeFileHash,
-  checkHash,
   uploadSingleFile,
   pollUploadJob,
   createTrack,
@@ -35,30 +33,9 @@ export async function uploadLocalAudioFiles({
       progress.finishFile({ ok, file })
     }
 
-    let fileHash
-    try {
-      fileHash = await computeFileHash(file)
-    } catch {
-      showToast(i18n.t('upload.processFailed', { name: file.name }))
-      finish(false)
-      return
-    }
-
-    try {
-      const check = await checkHash(fileHash, token)
-      if (check.exists) {
-        showToast(i18n.t('upload.exists', { title: displayTrackTitle({ id: check.track_id, title: check.title }) }))
-        await onTrackResolved(check.track_id)
-        finish(true)
-        return
-      }
-    } catch {
-      // 预检失败不阻断，继续上传让服务端兜底
-    }
-
     let jobId
     try {
-      const uploaded = await uploadSingleFile(file, fileHash, token)
+      const uploaded = await uploadSingleFile(file, token)
       jobId = uploaded.job_id
     } catch {
       showToast(i18n.t('upload.uploadFailed', { name: file.name }))

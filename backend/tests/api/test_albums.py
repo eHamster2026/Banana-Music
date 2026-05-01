@@ -21,6 +21,6 @@ async def test_list_albums_default_includes_more_than_legacy_page_size(client):
     finally:
         db.close()
 
-    r = await client.get("/albums")
+    r = await client.get("/rest/getAlbumList2")
     assert r.status_code == 200
     assert len(r.json()) == 25

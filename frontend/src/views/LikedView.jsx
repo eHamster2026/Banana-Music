@@ -20,7 +20,7 @@ export default function LikedView() {
 
   function loadTracks() {
     if (!token) { setLoading(false); return }
-    apiFetch('/library/tracks', {}, token)
+    apiFetch('/rest/getStarred2', {}, token)
       .then(data => {
         setTracks(data || [])
         setContextQueue(data || [])
@@ -44,7 +44,7 @@ export default function LikedView() {
 
   async function toggleLike(track) {
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       if (!res.liked) {
         setTracks(ts => ts.filter(t => t.id !== track.id))
         showToast(t('common.unliked'))

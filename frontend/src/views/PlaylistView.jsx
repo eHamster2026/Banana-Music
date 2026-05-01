@@ -20,7 +20,7 @@ export default function PlaylistView({ id }) {
 
   function loadPlaylist() {
     if (!id) return
-    apiFetch('/playlists/' + id, {}, token)
+    apiFetch('/rest/getPlaylist?id=' + id, {}, token)
       .then(data => {
         setPlaylist(data)
         setTopbarTitle(data.name)
@@ -46,7 +46,7 @@ export default function PlaylistView({ id }) {
   async function removeTrack(trackId) {
     if (!token) return
     try {
-      await apiFetch(`/playlists/${id}/tracks/${trackId}`, { method: 'DELETE' }, token)
+      await apiFetch(`/rest/removeFromPlaylist?id=${id}&track_id=${trackId}`, { method: 'DELETE' }, token)
       setPlaylist(p => ({
         ...p,
         tracks: p.tracks.filter(t => t.id !== trackId)
@@ -60,7 +60,7 @@ export default function PlaylistView({ id }) {
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setPlaylist(p => ({
         ...p,
         tracks: p.tracks.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t)

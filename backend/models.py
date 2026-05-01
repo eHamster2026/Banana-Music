@@ -106,8 +106,6 @@ class Track(Base):
     cover_path = Column(String(255), nullable=True)
     stream_url = Column(String(500), nullable=True)
     created_at = Column(Integer, default=utcnow)
-    # SHA-256 of raw file bytes — client-computable, used for pre-upload dedup check
-    file_hash = Column(LargeBinary(32), nullable=True, index=True)
     # MD5 of decoded PCM — format-invariant, used for dedup
     audio_hash = Column(LargeBinary(16), unique=True, nullable=False, index=True)
     # Chromaprint fingerprint bytes — computed by background worker

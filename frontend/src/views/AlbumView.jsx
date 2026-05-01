@@ -21,7 +21,7 @@ export default function AlbumView({ id }) {
   useEffect(() => {
     if (!id) return
     setLoading(true)
-    apiFetch('/albums/' + id, {}, token)
+    apiFetch('/rest/getAlbum?id=' + id, {}, token)
       .then(data => {
         setAlbum(data)
         setTopbarTitle(data.title)
@@ -33,15 +33,15 @@ export default function AlbumView({ id }) {
 
   useEffect(() => {
     if (!id || !token) return
-    apiFetch('/library/albums/' + id, {}, token)
-      .then(d => setInLibrary(d.in_library ?? false))
+    apiFetch('/rest/getStarred2?includeMeta=true', {}, token)
+      .then(d => setInLibrary((d.albums || []).some(album => String(album.id) === String(id))))
       .catch(() => {})
   }, [id, token])
 
   async function toggleAlbumLibrary() {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch('/library/albums/' + id, { method: 'POST' }, token)
+      const res = await apiFetch('/rest/toggleStar?albumId=' + id, { method: 'POST' }, token)
       setInLibrary(res.in_library)
       showToast(res.in_library ? t('albums.addToLiked') : t('albums.removeFromLiked'))
     } catch {
@@ -52,7 +52,7 @@ export default function AlbumView({ id }) {
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setAlbum(a => ({
         ...a,
         tracks: a.tracks.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t)

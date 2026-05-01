@@ -24,7 +24,7 @@ export default function AlbumLibraryView() {
   }, [t, setTopbarTitle])
 
   const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/albums/count')
+    const count = await apiFetch('/rest/getAlbumCount')
     const parsed = Number(count)
     if (Number.isFinite(parsed)) {
       setTotalCount(parsed)
@@ -41,7 +41,7 @@ export default function AlbumLibraryView() {
       if (initial) {
         await loadTotal()
       }
-      const data = await apiFetch(`/albums?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
+      const data = await apiFetch(`/rest/getAlbumList2?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
       const page = Array.isArray(data) ? data : []
       setAlbums(prev => {
         const seen = new Set(prev.map(a => a.id))

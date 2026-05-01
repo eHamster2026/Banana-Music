@@ -6,7 +6,7 @@ PluginContext — 注入给每个插件的主程序 API 对象。
 
 from __future__ import annotations
 
-import hashlib
+import secrets
 import shutil
 import threading
 from pathlib import Path
@@ -67,11 +67,10 @@ class PluginContext:
         将本地音频文件导入曲库。
 
         流程（复用 upload.py 的处理逻辑，不走 HTTP）：
-        1. 计算文件 SHA-256
-        2. 复制到 RESOURCE_DIR（以 hash 命名）
-        3. 调用 _process_uploaded_file_sync（无损转码、PCM hash、标签解析）
-        4. 音频 hash 去重
-        5. 写入 DB（threading.Lock 串行化）
+        1. 复制到 RESOURCE_DIR（随机文件名）
+        2. 调用 _process_uploaded_file_sync（无损转码、PCM hash、标签解析）
+        3. 音频 hash 去重
+        4. 写入 DB（threading.Lock 串行化）
 
         meta 提供的值优先于文件标签；title/artist 为空时回退到标签或 fallback 值。
 
@@ -99,24 +98,16 @@ class PluginContext:
         if suffix not in SUPPORTED_EXTS:
             raise ValueError(f"不支持的文件格式: {suffix}")
 
-        # 计算原始文件 SHA-256
-        h = hashlib.sha256()
-        with open(file_path, "rb") as f:
-            for chunk in iter(lambda: f.read(65536), b""):
-                h.update(chunk)
-        file_hash = h.digest()
-        file_hash_hex = file_hash.hex()
-
-        # 复制到 resource 目录（以 hash+扩展名 命名）
+        # 复制到 resource 目录；audio_hash 会在处理后统一计算并用于去重。
         RESOURCE_DIR.mkdir(exist_ok=True)
-        dest = RESOURCE_DIR / (file_hash_hex + suffix)
+        dest = RESOURCE_DIR / (secrets.token_hex(24) + suffix)
         if not dest.exists():
             shutil.copy2(file_path, dest)
 
         # 线程池处理：无损转码 + PCM hash + 时长 + 标签
-        result = _process_uploaded_file_sync(dest, file_path.name, file_hash, False)
+        result = _process_uploaded_file_sync(dest, file_path.name)
         final_suffix = result.get("final_suffix", suffix)
-        file_key = file_hash_hex + final_suffix
+        file_key = dest.stem + final_suffix
         audio_hash: Optional[bytes] = result["audio_hash"]
 
         db = SessionLocal()
@@ -130,10 +121,8 @@ class PluginContext:
                         .first()
                     )
                     if dup:
-                        # 转码后的文件已落盘但 key 不同时清理
-                        converted = RESOURCE_DIR / file_key
-                        if converted != dest:
-                            converted.unlink(missing_ok=True)
+                        # 本次导入产生的资源文件不再需要。
+                        (RESOURCE_DIR / file_key).unlink(missing_ok=True)
                         self.log("info", f"重复跳过 track_id={dup.id}")
                         return {"status": "duplicate", "track_id": dup.id, "title": dup.title}
 
@@ -176,7 +165,6 @@ class PluginContext:
                     track_number=track_number,
                     lyrics=lyrics,
                     stream_url=f"/resource/{file_key}",
-                    file_hash=file_hash,
                     audio_hash=audio_hash,
                 )
                 _apply_cover(tag, album_obj, track)

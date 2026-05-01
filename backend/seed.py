@@ -1,4 +1,6 @@
 """Run once to populate the database with demo data."""
+import hashlib
+
 from database import SessionLocal, engine
 import models
 
@@ -158,6 +160,9 @@ def seed():
                     duration_sec=duration, track_number=track_number,
                     stream_url=stream_url,
                     lyrics=LYRICS_SAMPLE if track_number == 1 else None,
+                    audio_hash=hashlib.md5(
+                        f"seed:{i}:{track_number}:{t_title}".encode("utf-8")
+                    ).digest(),
                 )
                 db.add(track)
                 track_counter += 1

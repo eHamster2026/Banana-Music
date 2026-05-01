@@ -67,7 +67,6 @@ CREATE TABLE tracks (
   cover_path        VARCHAR(255),
   stream_url        VARCHAR(500),
   created_at        INTEGER,
-  file_hash         BLOB,
   audio_hash        BLOB NOT NULL,  -- PCM MD5，16 字节
   audio_fingerprint BLOB
 );
@@ -194,7 +193,6 @@ CREATE UNIQUE INDEX ix_users_api_key  ON users (api_key);
 CREATE INDEX ix_albums_id ON albums (id);
 
 CREATE INDEX ix_tracks_id        ON tracks (id);
-CREATE INDEX ix_tracks_file_hash ON tracks (file_hash);
 CREATE UNIQUE INDEX ix_tracks_audio_hash ON tracks (audio_hash);
 
 CREATE INDEX ix_playlists_id ON playlists (id);
@@ -223,7 +221,6 @@ CREATE INDEX ix_banners_id ON banners (id);
 | 版本管理 | 版本历史写入 `schema_migrations` 表（v0.11 起），**`version` 为整数**（与 `SCHEMA_VERSION` 一致），替代原 `data/schema_version` 文件。版本不匹配时应用直接启动失败，必须手动迁移或手动 reset。 |
 | 库文件 | 默认 `sqlite:///music.db` → 实际文件 **`data/music.db`**（相对路径相对仓库根，见 `database.py`）。 |
 | WAL | 连接后由应用执行 `PRAGMA journal_mode=WAL` 等，**不在上表内**。 |
-| `file_hash` | 原始文件字节摘要 BLOB，用于上传前预检去重。 |
 | `audio_hash` | 格式无关音频摘要 BLOB，PCM MD5（16 字节），NOT NULL，**全局唯一**；历史长度变更见 `schema_version.py` 注释。 |
 | `audio_fingerprint` | Chromaprint 指纹，后台任务写入。 |
 | 多艺人 | `track_artists` / `album_artists` 存储 featured 等额外参与艺人；主艺人仍由 `tracks.artist_id` / `albums.artist_id` 指向。API 响应中以 `featured_artists` 字段暴露。搜索接口同时匹配 featured 艺人名。 |

@@ -18,10 +18,10 @@ export default function AllPlaylistsView() {
   useEffect(() => {
     setTopbarTitle(t('allPlaylists.pageTitle'))
     const fetches = [
-      apiFetch('/home').then(d => d.featured_playlists || []).catch(() => []),
+      apiFetch('/rest/x-banana/home').then(d => d.featured_playlists || []).catch(() => []),
     ]
     if (token) {
-      fetches.push(apiFetch('/library/playlists', {}, token).catch(() => []))
+      fetches.push(apiFetch('/rest/getPlaylists', {}, token).catch(() => []))
     } else {
       fetches.push(Promise.resolve([]))
     }
@@ -36,7 +36,7 @@ export default function AllPlaylistsView() {
   useEffect(() => {
     function reload() {
       if (!token) return
-      apiFetch('/library/playlists', {}, token)
+      apiFetch('/rest/getPlaylists', {}, token)
         .then(data => setUserPlaylists(data || []))
         .catch(() => {})
     }

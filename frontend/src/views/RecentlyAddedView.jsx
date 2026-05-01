@@ -30,7 +30,7 @@ export default function RecentlyAddedView() {
   }, [t, setTopbarTitle])
 
   const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/tracks/count', {}, token)
+    const count = await apiFetch('/rest/getSongCount', {}, token)
     const parsed = Number(count)
     if (Number.isFinite(parsed)) {
       setTotalCount(parsed)
@@ -48,7 +48,7 @@ export default function RecentlyAddedView() {
       if (replace) {
         await loadTotal()
       }
-      const data = await apiFetch(`/tracks?sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
+      const data = await apiFetch(`/rest/getSongs?sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
       const page = Array.isArray(data) ? data : []
       setTracks(prev => {
         if (replace) return page
@@ -102,7 +102,7 @@ export default function RecentlyAddedView() {
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setTracks(ts => ts.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t))
       showToast(res.liked ? t('common.liked') : t('common.unliked'))
     } catch {

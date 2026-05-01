@@ -3,7 +3,7 @@ import pytest
 
 @pytest.mark.asyncio
 async def test_search_returns_empty_lists(client):
-    r = await client.get("/search?q=x")
+    r = await client.get("/rest/search3?query=x")
     assert r.status_code == 200
     data = r.json()
     assert data["tracks"] == []
@@ -15,6 +15,6 @@ async def test_search_returns_empty_lists(client):
 
 @pytest.mark.asyncio
 async def test_suggestions_empty_db(client):
-    r = await client.get("/search/suggestions?q=a")
+    r = await client.get("/rest/x-banana/search/suggestions?q=a")
     assert r.status_code == 200
     assert r.json()["suggestions"] == []

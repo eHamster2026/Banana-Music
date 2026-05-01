@@ -24,9 +24,9 @@ export default function ArtistView({ id }) {
     if (!id) return
     setLoading(true)
     Promise.all([
-      apiFetch('/artists/' + id, {}, token),
-      apiFetch('/artists/' + id + '/albums', {}, token).catch(() => []),
-      apiFetch('/artists/' + id + '/tracks?limit=500', {}, token).catch(() => []),
+      apiFetch('/rest/getArtist?id=' + id, {}, token),
+      apiFetch('/rest/getArtistAlbums?id=' + id, {}, token).catch(() => []),
+      apiFetch('/rest/getArtistSongs?id=' + id + '&limit=500', {}, token).catch(() => []),
     ]).then(([a, albs, trs]) => {
       setArtist(a)
       setAlbums(albs || [])
@@ -39,15 +39,15 @@ export default function ArtistView({ id }) {
 
   useEffect(() => {
     if (!id || !token) return
-    apiFetch('/library/artists/' + id, {}, token)
-      .then(d => setInLibrary(d.in_library ?? false))
+    apiFetch('/rest/getStarred2?includeMeta=true', {}, token)
+      .then(d => setInLibrary((d.artists || []).some(artist => String(artist.id) === String(id))))
       .catch(() => {})
   }, [id, token])
 
   async function toggleArtistLibrary() {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch('/library/artists/' + id, { method: 'POST' }, token)
+      const res = await apiFetch('/rest/toggleStar?artistId=' + id, { method: 'POST' }, token)
       setInLibrary(res.in_library)
       showToast(res.in_library ? t('artists.followed') : t('artists.unfollowed'))
     } catch {
@@ -58,7 +58,7 @@ export default function ArtistView({ id }) {
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setTracks(ts => ts.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t))
       showToast(res.liked ? t('common.liked') : t('common.unliked'))
     } catch {

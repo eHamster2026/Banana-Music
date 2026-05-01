@@ -33,7 +33,7 @@ export default function LoginModal() {
     setLoginError('')
     setLoading(true)
     try {
-      const data = await apiFetch('/auth/login', {
+      const data = await apiFetch('/rest/x-banana/auth/login', {
         method: 'POST',
         body: JSON.stringify({ username: loginForm.username, password: loginForm.password }),
       })
@@ -51,7 +51,7 @@ export default function LoginModal() {
     setRegError('')
     setLoading(true)
     try {
-      const data = await apiFetch('/auth/register', {
+      const data = await apiFetch('/rest/x-banana/auth/register', {
         method: 'POST',
         body: JSON.stringify(regForm),
       })

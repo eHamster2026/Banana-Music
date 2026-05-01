@@ -148,7 +148,6 @@ def delete_track_file(
             filepath.unlink()
             deleted = True
         track.stream_url = None
-        track.audio_hash = None
         db.commit()
 
     return {"deleted": deleted, "track_id": track_id}

@@ -14,7 +14,7 @@ async def test_list_artists_default_includes_more_than_legacy_page_size(client):
     finally:
         db.close()
 
-    r = await client.get("/artists")
+    r = await client.get("/rest/getArtists")
     assert r.status_code == 200
     assert len(r.json()) == 25
 
@@ -32,6 +32,7 @@ async def test_artist_tracks_include_featured_artist_credits(client):
             title="Collab Track",
             artist_id=primary.id,
             duration_sec=180,
+            audio_hash=b"artist-track----",
         )
         db.add(track)
         db.flush()
@@ -47,7 +48,7 @@ async def test_artist_tracks_include_featured_artist_credits(client):
     finally:
         db.close()
 
-    r = await client.get(f"/artists/{featured_id}/tracks")
+    r = await client.get(f"/rest/getArtistSongs?id={featured_id}")
     assert r.status_code == 200
     assert [item["id"] for item in r.json()] == [track_id]
 

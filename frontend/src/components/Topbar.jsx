@@ -24,7 +24,7 @@ export default function Topbar() {
   const search = useCallback(async (q) => {
     if (!q.trim()) { setDropResults(null); setShowDrop(false); return }
     try {
-      const data = await apiFetch('/search?q=' + encodeURIComponent(q), {}, token)
+      const data = await apiFetch('/rest/search3?query=' + encodeURIComponent(q), {}, token)
       setDropResults(data)
       setShowDrop(true)
     } catch {

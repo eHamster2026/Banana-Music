@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import logging
 import os
@@ -960,56 +959,12 @@ async def process_file(
     return result
 
 
-def _sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _auth_headers(api_key: Optional[str], token: Optional[str]) -> dict[str, str]:
     if token:
         return {"Authorization": f"Bearer {token}"}
     if api_key:
         return {"x-api-key": api_key}
     return {}
-
-
-async def check_remote_duplicate_by_file_hash(
-    path: Path,
-    *,
-    base_url: str,
-    api_key: Optional[str],
-    token: Optional[str],
-    request_timeout: float,
-) -> Optional[dict]:
-    try:
-        import httpx
-    except ImportError:
-        raise RuntimeError("请安装 httpx: pip install httpx")
-
-    base_url = base_url.rstrip("/")
-    headers = _auth_headers(api_key, token)
-    file_hash = _sha256_file(path)
-
-    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
-        logging.info("[%s] 上传前远端预检重复...", path.name)
-        r = await client.get(f"{base_url}/tracks/check-hash", params={"h": file_hash})
-        r.raise_for_status()
-        check = r.json()
-
-    if not check.get("exists"):
-        return None
-
-    track_id = check.get("track_id")
-    logging.info("[%s] 远端已存在，track_id=%s，跳过本地处理", path.name, track_id)
-    return {
-        "file": str(path),
-        "status": "duplicate",
-        "track_id": track_id,
-        "title": check.get("title"),
-    }
 
 
 async def upload_file_to_backend(
@@ -1031,23 +986,12 @@ async def upload_file_to_backend(
 
     base_url = base_url.rstrip("/")
     headers = _auth_headers(api_key, token)
-    file_hash = _sha256_file(path)
 
     async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
-        logging.info("[%s] 预检重复...", path.name)
-        r = await client.get(f"{base_url}/tracks/check-hash", params={"h": file_hash})
-        r.raise_for_status()
-        check = r.json()
-        if check.get("exists"):
-            track_id = check.get("track_id")
-            logging.info("[%s] 已存在，track_id=%s", path.name, track_id)
-            return {"file": str(path), "status": "duplicate", "track_id": track_id, "title": check.get("title")}
-
         logging.info("[%s] 上传文件...", path.name)
         with path.open("rb") as f:
             r = await client.post(
-                f"{base_url}/tracks/upload-file",
-                data={"file_hash": file_hash},
+                f"{base_url}/rest/x-banana/tracks/upload-file",
                 files={"file": (path.name, f, "application/octet-stream")},
             )
         r.raise_for_status()
@@ -1058,7 +1002,7 @@ async def upload_file_to_backend(
             if asyncio.get_running_loop().time() >= deadline:
                 raise TimeoutError(f"上传任务超时: {job_id}")
             await asyncio.sleep(poll_interval)
-            s = await client.get(f"{base_url}/tracks/upload-status/{job_id}")
+            s = await client.get(f"{base_url}/rest/x-banana/tracks/upload-status/{job_id}")
             s.raise_for_status()
             state = s.json()
             if state.get("state") in ("pending", "processing"):
@@ -1080,7 +1024,7 @@ async def upload_file_to_backend(
 
             logging.info("[%s] 写入曲库...", path.name)
             created = await client.post(
-                f"{base_url}/tracks/create",
+                f"{base_url}/rest/x-banana/tracks/create",
                 json={"file_key": file_key, "parse_metadata": parse_metadata},
             )
             created.raise_for_status()
@@ -1104,7 +1048,7 @@ async def login_to_backend(
     base_url = base_url.rstrip("/")
     async with httpx.AsyncClient(timeout=request_timeout) as client:
         r = await client.post(
-            f"{base_url}/auth/login",
+            f"{base_url}/rest/x-banana/auth/login",
             json={"username": username, "password": password},
         )
         r.raise_for_status()
@@ -1158,7 +1102,13 @@ def _add_upload_options(parser: argparse.ArgumentParser, *, include_upload_flag:
     parser.add_argument("--token", default=os.getenv("BANANA_TOKEN"), help="Bearer token（可用 BANANA_TOKEN；优先于 API Key）")
     parser.add_argument("--username", default=os.getenv("BANANA_USERNAME"), help="登录用户名（可用 BANANA_USERNAME；优先级低于 --token，高于 API Key）")
     parser.add_argument("--password", default=os.getenv("BANANA_PASSWORD"), help="登录密码（可用 BANANA_PASSWORD；与 --username 同时使用）")
-    parser.add_argument("--no-parse-metadata", dest="parse_metadata", action="store_false", default=True, help="上传写库后不入队服务端 parse_upload 元数据清洗")
+    parser.add_argument(
+        "--parse-metadata",
+        dest="parse_metadata",
+        default=True,
+        action=argparse.BooleanOptionalAction,
+        help="是否在上传写库后入队服务端 parse_upload 元数据清洗（默认开启；批量导入已预处理时建议 --no-parse-metadata）",
+    )
     parser.add_argument("--poll-interval", default=0.8, type=float, help="上传任务轮询间隔秒数（默认 0.8）")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数（默认 120）")
     parser.add_argument("--request-timeout", default=120.0, type=float, help="HTTP 请求超时秒数（默认 120）")
@@ -1224,29 +1174,6 @@ async def _run_process(args: argparse.Namespace) -> None:
         upload_token = await resolve_upload_token(args) if args.upload else args.token
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             logging.info("─── 处理: %s", path)
-            if args.upload:
-                try:
-                    duplicate = await check_remote_duplicate_by_file_hash(
-                        path,
-                        base_url=args.base_url,
-                        api_key=args.api_key,
-                        token=upload_token,
-                        request_timeout=args.request_timeout,
-                    )
-                except Exception as exc:
-                    _log_unhandled_exception(f"[{path}] 上传前远端预检失败", exc)
-                    results.append({"file": str(path), "status": "error", "detail": str(exc)})
-                    continue
-                if duplicate:
-                    results.append({
-                        "file": str(path),
-                        "converted": None,
-                        "final_file": str(path),
-                        "llm_result": None,
-                        "upload_result": duplicate,
-                    })
-                    continue
-
             result = await process_file(
                 path,
                 effective_output_dir,
@@ -1288,17 +1215,6 @@ async def _run_upload(args: argparse.Namespace) -> None:
         tmp_dir = Path(tmp)
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             try:
-                duplicate = await check_remote_duplicate_by_file_hash(
-                    path,
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    token=upload_token,
-                    request_timeout=args.request_timeout,
-                )
-                if duplicate:
-                    results.append(duplicate)
-                    continue
-
                 dst = tmp_dir / path.name
                 counter = 1
                 while dst.exists():

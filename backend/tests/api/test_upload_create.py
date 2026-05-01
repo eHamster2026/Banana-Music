@@ -44,7 +44,8 @@ async def test_create_track_parse_metadata_false_skips_parse_upload_task(
     _stage_upload(file_key, tmp_path)
 
     r = await client.post(
-        "/tracks/create", json={"file_key": file_key, "parse_metadata": False}
+        "/rest/x-banana/tracks/create",
+        json={"file_key": file_key, "parse_metadata": False},
     )
 
     assert r.status_code == 200
@@ -63,7 +64,7 @@ async def test_create_track_parse_metadata_defaults_to_true(
     file_key = "b" * 64 + ".flac"
     _stage_upload(file_key, tmp_path)
 
-    r = await client.post("/tracks/create", json={"file_key": file_key})
+    r = await client.post("/rest/x-banana/tracks/create", json={"file_key": file_key})
 
     assert r.status_code == 200
     assert r.json()["status"] == "added"

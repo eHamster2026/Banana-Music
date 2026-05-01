@@ -21,5 +21,6 @@
 #   14  parse_upload_tasks 表（parse_upload 任务持久化，替代 fire-and-forget asyncio.create_task）
 #   15  schema_migrations.version 列类型 String → Integer
 #   16  audio_hash ORM 定义修正为 PCM MD5（16 B），并设为 NOT NULL
+#   17  tracks: 移除 file_hash；上传与去重统一使用 audio_hash
 
-SCHEMA_VERSION = 16
+SCHEMA_VERSION = 17

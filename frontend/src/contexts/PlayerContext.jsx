@@ -47,7 +47,7 @@ function clearLocalPlayerState() {
 async function trackStillValid(track, token) {
   if (!track?.id || !token) return false
   try {
-    await apiFetch('/tracks/' + track.id + '/stream', {}, token)
+    await apiFetch('/rest/getStreamInfo?id=' + track.id, {}, token)
     return true
   } catch (e) {
     return false
@@ -111,7 +111,7 @@ export function PlayerProvider({ children }) {
     const tok = tokenRef.current
     if (!tok) return null
     try {
-      const state = await apiFetch('/queue/command', {
+      const state = await apiFetch('/rest/x-banana/queue/command', {
         method: 'POST',
         body: JSON.stringify({ command, device_id: DEVICE_ID, ...extra }),
       }, tok)
@@ -209,7 +209,7 @@ export function PlayerProvider({ children }) {
 
     let src = ''
     try {
-      const data = await apiFetch('/tracks/' + track.id + '/stream', {}, tokenRef.current)
+      const data = await apiFetch('/rest/getStreamInfo?id=' + track.id, {}, tokenRef.current)
       src = data.stream_url || ''
     } catch (e) {
       // 勿回退到本地缓存的 stream_url：库已重置或曲目已删时，旧 URL 只会造成 /resource 404
@@ -249,7 +249,7 @@ export function PlayerProvider({ children }) {
     audio.load()
 
     if (tokenRef.current) {
-      apiFetch('/history/play', {
+      apiFetch('/rest/scrobble', {
         method: 'POST',
         body: JSON.stringify({ track_id: track.id }),
       }, tokenRef.current).catch(() => {})
@@ -339,7 +339,7 @@ export function PlayerProvider({ children }) {
   // ── fetch initial queue from server ──────────────────────────
   const fetchQueue = useCallback(async (tok) => {
     try {
-      const state = await apiFetch('/queue', {}, tok)
+      const state = await apiFetch('/rest/getPlayQueue', {}, tok)
       if (state.active_device === DEVICE_ID && state.items && state.items.length > 0) {
         await applyRemoteState(state)
       } else {
@@ -392,7 +392,7 @@ export function PlayerProvider({ children }) {
 
   async function loadAndPlayTrack(id) {
     try {
-      const track = await apiFetch('/tracks/' + id, {}, token)
+      const track = await apiFetch('/rest/getSong?id=' + id, {}, token)
       playTrack(track)
     } catch (e) {
       console.error('loadAndPlayTrack error', e)

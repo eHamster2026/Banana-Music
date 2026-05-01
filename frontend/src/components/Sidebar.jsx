@@ -14,7 +14,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (token) {
-      apiFetch('/library/playlists', {}, token)
+      apiFetch('/rest/getPlaylists', {}, token)
         .then(data => setPlaylists(data || []))
         .catch(() => setPlaylists([]))
     } else {

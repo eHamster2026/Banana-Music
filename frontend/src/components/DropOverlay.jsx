@@ -61,14 +61,14 @@ export default function DropOverlay() {
       async function addToLibrary(trackId) {
         if (_isLiked) {
           try {
-            const res = await apiFetch(`/library/tracks/${trackId}/like`, { method: 'POST' }, token)
-            if (res.liked === false) await apiFetch(`/library/tracks/${trackId}/like`, { method: 'POST' }, token)
+            const res = await apiFetch(`/rest/toggleStar?id=${trackId}`, { method: 'POST' }, token)
+            if (res.liked === false) await apiFetch(`/rest/toggleStar?id=${trackId}`, { method: 'POST' }, token)
             showToast(t('upload.addedToLiked'))
           } catch { showToast(t('upload.addedToLikedFail')) }
           window.dispatchEvent(new Event('likedTracksUpdated'))
         } else if (_isPlaylist && _playlistId) {
           try {
-            await apiFetch(`/playlists/${_playlistId}/tracks`, {
+            await apiFetch(`/rest/addToPlaylist?id=${_playlistId}`, {
               method: 'POST', body: JSON.stringify({ track_id: trackId }),
             }, token)
             showToast(t('upload.addedToPlaylist'))

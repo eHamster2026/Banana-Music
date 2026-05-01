@@ -17,11 +17,12 @@ async def test_list_tracks_default_includes_more_than_legacy_page_size(client):
                 artist_id=artist.id,
                 duration_sec=180,
                 stream_url=f"/resource/track-{i}.flac",
+                audio_hash=f"track-{i}".encode("ascii").ljust(16, b"-"),
             ))
         db.commit()
     finally:
         db.close()
 
-    r = await client.get("/tracks?local=true&sort=recent")
+    r = await client.get("/rest/getSongs")
     assert r.status_code == 200
     assert len(r.json()) == 25

@@ -19,33 +19,15 @@ export async function apiFetch(path, opts = {}, token = null) {
 
 export const MAX_CONCURRENT_UPLOADS = 3
 
-/** 客户端计算文件原始字节的 SHA-256（与 Python hashlib.sha256 一致） */
-export async function computeFileHash(file) {
-  const buf = await file.arrayBuffer()
-  const hashBuf = await crypto.subtle.digest('SHA-256', buf)
-  return Array.from(new Uint8Array(hashBuf))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-/**
- * 按原始文件 hash 单条预检（每文件独立调用，不批量）。
- * 返回 {exists, track_id?, title?}
- */
-export function checkHash(fileHash, token) {
-  return apiFetch(`/tracks/check-hash?h=${fileHash}`, {}, token)
-}
-
 /**
  * 上传单个文件。文件存盘后立即返回，处理（转码/hash/查重）在后台进行。
  * 返回：{job_id}
  * 用 pollUploadJob(job_id) 轮询结果，state=done 后再调用 createTrack。
  */
-export function uploadSingleFile(file, fileHash, token) {
+export function uploadSingleFile(file, token) {
   const form = new FormData()
   form.append('file', file)
-  form.append('file_hash', fileHash)
-  return fetch(API + '/tracks/upload-file', {
+  return fetch(API + '/rest/x-banana/tracks/upload-file', {
     method: 'POST',
     body: form,
     headers: token ? { Authorization: 'Bearer ' + token } : {},
@@ -61,7 +43,7 @@ export function uploadSingleFile(file, fileHash, token) {
  *   {state: 'error', detail}
  */
 export function getUploadStatus(jobId, token) {
-  return apiFetch(`/tracks/upload-status/${jobId}`, {}, token)
+  return apiFetch(`/rest/x-banana/tracks/upload-status/${jobId}`, {}, token)
 }
 
 /**
@@ -119,7 +101,7 @@ export async function allSettledWithConcurrency(items, concurrency, worker) {
  * 返回 {status, track_id, title, artist, artists}
  */
 export function createTrack(body, token) {
-  return apiFetch('/tracks/create', {
+  return apiFetch('/rest/x-banana/tracks/create', {
     method: 'POST',
     body: JSON.stringify(body),
   }, token)

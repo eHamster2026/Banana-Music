@@ -30,7 +30,7 @@ export default function CreatePlaylistModal() {
     setError('')
     setLoading(true)
     try {
-      await apiFetch('/playlists', {
+      await apiFetch('/rest/createPlaylist', {
         method: 'POST',
         body: JSON.stringify({ name: name.trim(), description: desc.trim(), art_color: color }),
       }, token)

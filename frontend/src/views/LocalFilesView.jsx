@@ -30,7 +30,7 @@ export default function LocalFilesView() {
   }, [t, setTopbarTitle])
 
   const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/tracks/count?local=true', {}, token)
+    const count = await apiFetch('/rest/getSongCount?local=true', {}, token)
     const parsed = Number(count)
     if (Number.isFinite(parsed)) {
       setTotalCount(parsed)
@@ -48,7 +48,7 @@ export default function LocalFilesView() {
       if (replace) {
         await loadTotal()
       }
-      const data = await apiFetch(`/tracks?local=true&sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
+      const data = await apiFetch(`/rest/getSongs?local=true&sort=recent&skip=${skip}&limit=${PAGE_SIZE}`, {}, token)
       const page = Array.isArray(data) ? data : []
       setTracks(prev => {
         if (replace) return page
@@ -103,7 +103,7 @@ export default function LocalFilesView() {
   async function toggleLike(track) {
     if (!token) { showToast(t('common.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setTracks(ts => ts.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t))
       showToast(res.liked ? t('common.liked') : t('common.unliked'))
     } catch {

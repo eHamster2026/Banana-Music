@@ -9,8 +9,8 @@ from main import app
 
 @pytest.mark.asyncio
 async def test_search_contract_anonymous_ok(client):
-    """/search 可匿名；OpenAPI 可能仍列出可选 Bearer，但无头请求必须 200。"""
-    r = await client.get("/search?q=contract")
+    """/rest/search3 可匿名；OpenAPI 可能仍列出可选 Bearer，但无头请求必须 200。"""
+    r = await client.get("/rest/search3?query=contract")
     assert r.status_code == 200
     data = r.json()
     assert "plugin_hits" in data

@@ -24,7 +24,7 @@ export default function ArtistLibraryView() {
   }, [t, setTopbarTitle])
 
   const loadTotal = useCallback(async () => {
-    const count = await apiFetch('/artists/count')
+    const count = await apiFetch('/rest/getArtistCount')
     const parsed = Number(count)
     if (Number.isFinite(parsed)) {
       setTotalCount(parsed)
@@ -41,7 +41,7 @@ export default function ArtistLibraryView() {
       if (initial) {
         await loadTotal()
       }
-      const data = await apiFetch(`/artists?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
+      const data = await apiFetch(`/rest/getArtists?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
       const page = Array.isArray(data) ? data : []
       setArtists(prev => {
         const seen = new Set(prev.map(a => a.id))

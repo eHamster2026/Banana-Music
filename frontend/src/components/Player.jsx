@@ -64,7 +64,7 @@ export default function Player() {
 
     let cancelled = false
     setLyricsLoading(true)
-    apiFetch('/tracks/' + currentTrack.id, {}, token)
+    apiFetch('/rest/getSong?id=' + currentTrack.id, {}, token)
       .then(data => {
         if (!cancelled) setTrackDetail(data)
       })
@@ -82,7 +82,7 @@ export default function Player() {
     if (!token) { setShowLoginModal(true); return }
     if (!currentTrack) return
     try {
-      const res = await apiFetch(`/library/tracks/${currentTrack.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${currentTrack.id}`, { method: 'POST' }, token)
       setIsLiked(res.liked)
       showToast(res.liked ? t('player.liked') : t('player.unliked'))
     } catch {

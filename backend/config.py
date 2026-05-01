@@ -33,8 +33,6 @@ class Settings(BaseSettings):
     # ── Upload ────────────────────────────────────────────────────────────────
     # Max threads used for upload processing. Default keeps at least one CPU core free.
     upload_max_workers: int = max(1, (os.cpu_count() or 4) - 1)
-    # Verify that the file's SHA-256 matches the client-submitted hash
-    upload_verify_hash: bool = False
     # Chromaprint 指纹队列与后台 worker；未装 fpcalc 时设为 false 可避免相关日志与任务
     fingerprint_enabled: bool = True
     # 指纹写入后自动调用元数据插件补全（仅填补未知艺人/无专辑等；默认关闭）

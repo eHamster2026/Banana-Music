@@ -16,7 +16,7 @@ export default function AddToPlaylistModal() {
 
   useEffect(() => {
     if (showAddToPl && token) {
-      apiFetch('/library/playlists', {}, token)
+      apiFetch('/rest/getPlaylists', {}, token)
         .then(data => setPlaylists(data || []))
         .catch(() => setPlaylists([]))
     }
@@ -28,7 +28,7 @@ export default function AddToPlaylistModal() {
     setError('')
     setLoading(true)
     try {
-      await apiFetch('/playlists/' + plId + '/tracks', {
+      await apiFetch('/rest/addToPlaylist?id=' + plId, {
         method: 'POST',
         body: JSON.stringify({ track_id: addToPlTrackId }),
       }, token)

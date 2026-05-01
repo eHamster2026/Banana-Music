@@ -24,7 +24,7 @@ export default function SearchView({ query }) {
     setTopbarTitle(query?.trim() ? t('topbar.searchPrefix') + query : t('search.pageTitle'))
     if (!query?.trim()) { setResults(null); return }
     setLoading(true)
-    apiFetch('/search?q=' + encodeURIComponent(query), {}, token)
+    apiFetch('/rest/search3?query=' + encodeURIComponent(query), {}, token)
       .then(data => {
         setResults(data)
         if (data.tracks) setContextQueue(data.tracks)
@@ -36,7 +36,7 @@ export default function SearchView({ query }) {
   async function toggleLike(track) {
     if (!token) { showToast(t('search.loginFirst')); return }
     try {
-      const res = await apiFetch(`/library/tracks/${track.id}/like`, { method: 'POST' }, token)
+      const res = await apiFetch(`/rest/toggleStar?id=${track.id}`, { method: 'POST' }, token)
       setResults(r => ({
         ...r,
         tracks: r.tracks?.map(t => t.id === track.id ? { ...t, is_liked: res.liked } : t)
@@ -53,7 +53,7 @@ export default function SearchView({ query }) {
     setPluginDl(s => ({ ...s, [key]: 'loading' }))
     try {
       const result = await apiFetch(
-        '/plugins/download',
+        '/rest/x-banana/plugins/download',
         {
           method: 'POST',
           body: JSON.stringify({

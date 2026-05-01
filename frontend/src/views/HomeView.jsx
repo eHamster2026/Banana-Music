@@ -20,13 +20,12 @@ export default function HomeView() {
   useEffect(() => {
     if (!token) { setLoading(false); return }
     Promise.all([
-      apiFetch('/library/playlists', {}, token).catch(() => []),
-      apiFetch('/library/albums',    {}, token).catch(() => []),
-      apiFetch('/library/artists',   {}, token).catch(() => []),
-    ]).then(([pls, albs, arts]) => {
-      setPlaylists(pls  || [])
-      setAlbums(albs    || [])
-      setArtists(arts   || [])
+      apiFetch('/rest/getPlaylists', {}, token).catch(() => []),
+      apiFetch('/rest/getStarred2?includeMeta=true', {}, token).catch(() => ({})),
+    ]).then(([pls, starred]) => {
+      setPlaylists(pls || [])
+      setAlbums(starred?.albums || [])
+      setArtists(starred?.artists || [])
       setLoading(false)
     })
   }, [token])
@@ -35,7 +34,7 @@ export default function HomeView() {
   useEffect(() => {
     function reload() {
       if (!token) return
-      apiFetch('/library/playlists', {}, token).then(d => setPlaylists(d || []))
+      apiFetch('/rest/getPlaylists', {}, token).then(d => setPlaylists(d || []))
     }
     window.addEventListener('playlistsUpdated', reload)
     return () => window.removeEventListener('playlistsUpdated', reload)

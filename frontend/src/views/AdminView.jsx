@@ -44,7 +44,7 @@ function TrackEditForm({ track, token, onSave, onCancel }) {
 
   async function handleSave() {
     try {
-      const updated = await apiFetch(`/admin/tracks/${track.id}`, {
+      const updated = await apiFetch(`/rest/x-banana/admin/tracks/${track.id}`, {
         method: 'PUT',
         body: JSON.stringify(form),
       }, token)
@@ -57,7 +57,7 @@ function TrackEditForm({ track, token, onSave, onCancel }) {
   async function handleLookupMetadata() {
     setLookupLoading(true)
     try {
-      const results = await apiFetch('/plugins/metadata/lookup', {
+      const results = await apiFetch('/rest/x-banana/plugins/metadata/lookup', {
         method: 'POST',
         body: JSON.stringify({ track_id: track.id }),
       }, token)
@@ -192,7 +192,7 @@ function TracksTab({ token }) {
   const load = useCallback(async (pageNum = 0, query = q) => {
     try {
       const data = await apiFetch(
-        `/admin/tracks?skip=${pageNum * PAGE}&limit=${PAGE}${query ? `&q=${encodeURIComponent(query)}` : ''}`,
+        `/rest/x-banana/admin/tracks?skip=${pageNum * PAGE}&limit=${PAGE}${query ? `&q=${encodeURIComponent(query)}` : ''}`,
         {}, token
       )
       setTracks(data.items)
@@ -222,7 +222,7 @@ function TracksTab({ token }) {
       onOk: async () => {
         setConfirm(null)
         try {
-          await apiFetch(`/admin/tracks/${track.id}/file`, { method: 'DELETE' }, token)
+          await apiFetch(`/rest/x-banana/admin/tracks/${track.id}/file`, { method: 'DELETE' }, token)
           setTracks(ts => ts.map(t => t.id === track.id ? { ...t, stream_url: null } : t))
           showToast(t('admin.fileDeleted'))
         } catch (e) { showToast(t('admin.deleteFailed') + e.message) }
@@ -236,7 +236,7 @@ function TracksTab({ token }) {
       onOk: async () => {
         setConfirm(null)
         try {
-          await apiFetch(`/admin/tracks/${track.id}`, { method: 'DELETE' }, token)
+          await apiFetch(`/rest/x-banana/admin/tracks/${track.id}`, { method: 'DELETE' }, token)
           setTracks(ts => ts.filter(t => t.id !== track.id))
           setTotal(n => n - 1)
           showToast(t('admin.trackDeleted'))
@@ -246,6 +246,22 @@ function TracksTab({ token }) {
   }
 
   const totalPages = Math.ceil(total / PAGE)
+  const trackHeaders = [
+    { label: '', width: 42 },
+    { label: t('admin.colId'), width: 64 },
+    { label: t('admin.colTitle'), width: 230 },
+    { label: t('admin.colArtist'), width: 180 },
+    { label: t('admin.colAlbum'), width: 200 },
+    { label: t('admin.colDuration'), width: 86 },
+    { label: t('admin.colFile'), width: 88 },
+    { label: t('admin.colActions'), width: 250 },
+  ]
+  const ellipsisCell = {
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    minWidth: 0,
+  }
 
   return (
     <div>
@@ -273,16 +289,25 @@ function TracksTab({ token }) {
       </div>
 
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', minWidth: 1140, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
+          <colgroup>
+            {trackHeaders.map((h, idx) => (
+              <col key={`${h.label}-${idx}`} style={{ width: h.width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-              {['', t('admin.colId'), t('admin.colTitle'), t('admin.colArtist'), t('admin.colAlbum'), t('admin.colDuration'), t('admin.colFile'), t('admin.colActions')].map(h => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap' }}>{h}</th>
+              {trackHeaders.map((h, idx) => (
+                <th key={`${h.label}-${idx}`} style={{ padding: '8px 10px', textAlign: 'left', fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{h.label}</th>
               ))}
             </tr>
           </thead>
           <tbody>
-            {tracks.map(track => (
+            {tracks.map(track => {
+              const artistText = formatTrackArtists(track) || '—'
+              const albumText = track.album?.title || '—'
+              const titleText = displayTrackTitle(track)
+              return (
               <React.Fragment key={track.id}>
                 <tr style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
                   onMouseEnter={e => e.currentTarget.style.background = 'var(--hover)'}
@@ -301,17 +326,32 @@ function TracksTab({ token }) {
                       {currentTrackId === track.id ? '♫' : '▶'}
                     </button>
                   </td>
-                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)' }}>{track.id}</td>
-                  <td style={{ padding: '10px 10px', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    color: currentTrackId === track.id ? 'var(--accent)' : 'var(--text)' }}>{displayTrackTitle(track)}</td>
-                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{formatTrackArtists(track)}</td>
-                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{track.album?.title || '—'}</td>
+                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', ...ellipsisCell }}>{track.id}</td>
+                  <td
+                    title={titleText}
+                    style={{ padding: '10px 10px', color: currentTrackId === track.id ? 'var(--accent)' : 'var(--text)', ...ellipsisCell }}
+                  >
+                    {titleText}
+                  </td>
+                  <td
+                    title={artistText}
+                    style={{ padding: '10px 10px', color: 'var(--text-secondary)', ...ellipsisCell }}
+                  >
+                    {artistText}
+                  </td>
+                  <td
+                    title={albumText}
+                    style={{ padding: '10px 10px', color: 'var(--text-secondary)', ...ellipsisCell }}
+                  >
+                    {albumText}
+                  </td>
                   <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{fmtTime(track.duration_sec)}</td>
-                  <td style={{ padding: '10px 10px' }}>
+                  <td style={{ padding: '10px 10px', overflow: 'hidden' }}>
                     <span style={{
                       fontSize: 11, padding: '2px 8px', borderRadius: 10,
                       background: track.stream_url ? 'rgba(39,174,96,0.2)' : 'rgba(231,76,60,0.2)',
                       color: track.stream_url ? '#27ae60' : '#e74c3c',
+                      display: 'inline-block', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
                       {track.stream_url ? t('admin.hasFile') : t('admin.noFile')}
                     </span>
@@ -349,7 +389,8 @@ function TracksTab({ token }) {
                   </tr>
                 )}
               </React.Fragment>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -383,7 +424,7 @@ function UsersTab({ token, currentUser }) {
   const { showToast } = useToast()
 
   useEffect(() => {
-    apiFetch('/admin/users', {}, token)
+    apiFetch('/rest/x-banana/admin/users', {}, token)
       .then(setUsers)
       .catch(e => showToast(t('admin.loadUsersFailed') + e.message))
   }, [token, t, showToast])
@@ -396,7 +437,7 @@ function UsersTab({ token, currentUser }) {
     }
     setCreating(true)
     try {
-      const user = await apiFetch('/admin/users', {
+      const user = await apiFetch('/rest/x-banana/admin/users', {
         method: 'POST',
         body: JSON.stringify(form),
       }, token)
@@ -413,7 +454,7 @@ function UsersTab({ token, currentUser }) {
 
   async function toggleAdmin(user) {
     try {
-      const updated = await apiFetch(`/admin/users/${user.id}`, {
+      const updated = await apiFetch(`/rest/x-banana/admin/users/${user.id}`, {
         method: 'PUT',
         body: JSON.stringify({ is_admin: !user.is_admin }),
       }, token)
@@ -428,7 +469,7 @@ function UsersTab({ token, currentUser }) {
       onOk: async () => {
         setConfirm(null)
         try {
-          await apiFetch(`/admin/users/${user.id}`, { method: 'DELETE' }, token)
+          await apiFetch(`/rest/x-banana/admin/users/${user.id}`, { method: 'DELETE' }, token)
           setUsers(us => us.filter(u => u.id !== user.id))
           showToast(t('admin.userDeleted'))
         } catch (e) { showToast(t('admin.deleteFailed') + e.message) }
@@ -642,7 +683,7 @@ function PluginsTab({ token }) {
   }, [])
 
   const loadDetail = useCallback(async (pluginId) => {
-    const data = await apiFetch(`/plugins/${pluginId}`, {}, token)
+    const data = await apiFetch(`/rest/x-banana/plugins/${pluginId}`, {}, token)
     setSelectedId(pluginId)
     setDetail(data)
     setForm(data.config || {})
@@ -653,7 +694,7 @@ function PluginsTab({ token }) {
   const loadPlugins = useCallback(async (preferredId = null) => {
     setLoading(true)
     try {
-      const data = await apiFetch('/plugins', {}, token)
+      const data = await apiFetch('/rest/x-banana/plugins', {}, token)
       setPlugins(data)
       const nextId = preferredId || selectedId || data[0]?.id || null
       if (nextId) {
@@ -681,7 +722,7 @@ function PluginsTab({ token }) {
     if (!selectedId) return
     setSaving(true)
     try {
-      const updated = await apiFetch(`/plugins/${selectedId}/config`, {
+      const updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/config`, {
         method: 'PUT',
         body: JSON.stringify({ config: form }),
       }, token)
@@ -700,7 +741,7 @@ function PluginsTab({ token }) {
     if (!selectedId) return
     setActing(true)
     try {
-      const updated = await apiFetch(`/plugins/${selectedId}/${action}`, {
+      const updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/${action}`, {
         method: 'POST',
       }, token)
       setDetail(updated)

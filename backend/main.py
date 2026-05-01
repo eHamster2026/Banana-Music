@@ -17,7 +17,7 @@ REACT_DIST   = FRONTEND_DIR / "frontend" / "dist"
 DATA_DIR     = FRONTEND_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-SCHEMA_DESCRIPTION = "audio_hash ORM 定义修正为 PCM MD5（16 B），并设为 NOT NULL"
+SCHEMA_DESCRIPTION = "tracks 移除 file_hash；上传与去重统一使用 audio_hash"
 
 # ── Schema 版本检查 ────────────────────────────────────────────
 # 版本历史存储在 schema_migrations 表，避免文件与数据库不一致。
@@ -83,7 +83,7 @@ from seed import seed
 if not settings.banana_testing:
     seed()
 
-from routers import auth, home, search, tracks, albums, artists, playlists, library, history, upload, admin, queue, plugins as plugins_router
+from routers import rest, upload
 import plugins.loader as plugin_loader
 
 PLUGIN_DIR = FRONTEND_DIR / "plugins"
@@ -122,19 +122,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-app.include_router(auth.router)
-app.include_router(home.router)
-app.include_router(search.router)
-app.include_router(upload.router)   # must come before tracks.router — /tracks/check-hash etc.
-app.include_router(tracks.router)   # has /tracks/{id} wildcard — must be after upload routes
-app.include_router(albums.router)
-app.include_router(artists.router)
-app.include_router(playlists.router)
-app.include_router(library.router)
-app.include_router(history.router)
-app.include_router(admin.router)
-app.include_router(queue.router)
-app.include_router(plugins_router.router)
+app.include_router(rest.router)
 
 RESOURCE_DIR = DATA_DIR / "resource"
 RESOURCE_DIR.mkdir(exist_ok=True)
@@ -165,8 +153,11 @@ def root():
 # Catch-all for SPA routing (non-API paths)
 @app.get("/{full_path:path}")
 def spa_fallback(full_path: str):
-    api_prefixes = ("auth/", "home", "search", "tracks/", "albums/", "artists/",
-                    "playlists/", "library/", "history/", "assets/", "upload", "admin/", "queue", "plugins")
+    api_prefixes = (
+        "rest/", "auth", "home", "search", "tracks", "albums", "artists",
+        "playlists", "library", "history", "assets/", "upload", "admin",
+        "queue", "plugins",
+    )
     if any(full_path.startswith(p) for p in api_prefixes):
         raise HTTPException(status_code=404)
     return _serve_index()

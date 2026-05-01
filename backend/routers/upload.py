@@ -2,7 +2,6 @@
 routers/upload.py
 
 三步上传 API：
-  GET  /tracks/check-hash             — 按原始文件 hash 单条预检（客户端上传前调用）
   POST /tracks/upload-file            — 存文件 → 入队 → 立即返回 {job_id}
   GET  /tracks/upload-status/{job_id} — 轮询任务状态（pending/processing/done/error）
   POST /tracks/create                 — asyncio.Lock 串行写库 + 入队 parse_upload_tasks（指纹/LLM 清洗）
@@ -29,7 +28,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -77,7 +76,6 @@ class _UploadJob:
     job_id:        str
     save_path:     Path
     original_name: str
-    raw_hash:      bytes
     created_at:    float = field(default_factory=_time.time)
     state:         str   = "pending"   # pending | processing | done | error
     result:        dict | None = None  # done 时: {status, file_key} 或 {status, track_id, title}
@@ -132,14 +130,8 @@ async def _process_upload_job(loop: asyncio.AbstractEventLoop, job: _UploadJob) 
         result = await loop.run_in_executor(
             _executor,
             _process_uploaded_file_sync,
-            job.save_path, job.original_name, job.raw_hash,
-            settings.upload_verify_hash,
+            job.save_path, job.original_name,
         )
-    except ValueError:
-        job.save_path.unlink(missing_ok=True)
-        job.state = "error"
-        job.error_detail = "文件 hash 不匹配，完整性校验失败"
-        return
     except RuntimeError as exc:
         logger.warning(
             "upload_worker 转码失败: file=%s err=%s", job.original_name, exc,
@@ -154,8 +146,7 @@ async def _process_upload_job(loop: asyncio.AbstractEventLoop, job: _UploadJob) 
         return
 
     final_suffix = result.pop("final_suffix", original_suffix)
-    file_hash_hex = job.save_path.stem           # save_path = RESOURCE_DIR / (hash + suffix)
-    file_key      = file_hash_hex + final_suffix  # 转码后可能由 .ape/.wav → .flac
+    file_key      = job.save_path.stem + final_suffix  # 转码后可能由 .ape/.wav → .flac
     audio_hash    = result["audio_hash"]
     if audio_hash is None:
         (RESOURCE_DIR / file_key).unlink(missing_ok=True)
@@ -627,15 +618,6 @@ def _compute_fingerprint(filepath: Path) -> bytes | None:
     return None
 
 
-def _compute_file_hash(filepath: Path) -> bytes:
-    """SHA-256 of raw file bytes（与浏览器 crypto.subtle.digest 一致）。"""
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.digest()
-
-
 def _read_flac_md5(filepath: Path) -> bytes | None:
     """
     Read the PCM MD5 stored in the FLAC STREAMINFO block.
@@ -918,22 +900,14 @@ def _get_or_create_album(
 def _process_uploaded_file_sync(
     save_path: Path,
     original_name: str,
-    raw_hash: bytes,
-    verify: bool,
 ) -> dict:
     """
     Run in thread pool (truly parallel across concurrent uploads):
-    1. Optional raw-hash integrity check
-    2. Lossless transcode → FLAC level-5 + ReplayGain（仅 APE/WAV/WMA；上传的 FLAC 不重编码）
-    3. PCM hash (format-agnostic dedup)
-    4. Duration + tag parsing on the final (possibly converted) file
+    1. Lossless transcode → FLAC level-5 + ReplayGain（仅 APE/WAV/WMA；上传的 FLAC 不重编码）
+    2. PCM hash (format-agnostic dedup)
+    3. Duration + tag parsing on the final (possibly converted) file
     Fingerprinting is deferred to the background idle worker.
     """
-    if verify:
-        actual = _compute_file_hash(save_path)
-        if actual != raw_hash:
-            raise ValueError("hash_mismatch")
-
     suffix     = save_path.suffix.lower()
     final_path = save_path
     # 转码前从源文件解析的标签，避免 ffmpeg 输出的 FLAC 缺字段（APE/WAV/WMA）。
@@ -991,38 +965,20 @@ class CreateTrackRequest(BaseModel):
         description="是否入队执行 parse_upload 元数据清洗；false 时仅使用文件内嵌标签写库",
     )
     # 元数据由服务端从上传缓存（LLM 清洗结果 → 文件标签 → 文件名）自动解析，
-    # 客户端无需提交。audio_hash / file_hash / duration_sec 等均从缓存读取。
+    # 客户端无需提交。audio_hash / duration_sec 等均从缓存读取。
 
 
 # ── 端点 ──────────────────────────────────────────────────────
 
-@router.get("/check-hash")
-async def check_hash(h: str = Query(..., description="原始文件 SHA-256 hex"), db: Session = Depends(get_db)):
-    """
-    按原始文件 hash 单条预检重复，客户端上传前调用。
-    使用原始字节 hash（浏览器可直接计算），快速排除明显重复。
-    格式无关去重在 upload-file 阶段由服务端 PCM hash 兜底。
-    """
-    try:
-        raw = bytes.fromhex(h)
-    except ValueError:
-        raise HTTPException(400, "无效的 hash 格式")
-    dup = db.query(models.Track).filter(models.Track.file_hash == raw).first()
-    if dup:
-        return {"exists": True, "track_id": dup.id, "title": dup.title}
-    return {"exists": False}
-
-
 @router.post("/upload-file")
 async def upload_file_endpoint(
     file: UploadFile = File(...),
-    file_hash: str   = Form(...),
 ):
     """
     上传单个音频文件，立即返回 {job_id}。
 
     流程：
-    1. 写文件到磁盘（已存在则跳过，幂等）
+    1. 写文件到磁盘
     2. 创建 _UploadJob 并加入 _upload_queue
     3. 立即返回，转码 / hash / 查重 / 写库由后台 upload_worker 处理
 
@@ -1034,28 +990,21 @@ async def upload_file_endpoint(
     if suffix not in SUPPORTED_EXTS:
         raise HTTPException(400, "不支持的格式")
 
-    try:
-        raw_hash = bytes.fromhex(file_hash)
-    except ValueError:
-        raise HTTPException(400, "无效的 hash 格式")
-
-    save_path = RESOURCE_DIR / (file_hash + suffix)
+    save_path = RESOURCE_DIR / (secrets.token_hex(24) + suffix)
     RESOURCE_DIR.mkdir(exist_ok=True)
 
-    if not save_path.exists():
-        with save_path.open("wb") as out:
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                out.write(chunk)
+    with save_path.open("wb") as out:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            out.write(chunk)
 
     _evict_stale_jobs()
     job = _UploadJob(
         job_id=secrets.token_hex(16),
         save_path=save_path,
         original_name=original_name,
-        raw_hash=raw_hash,
     )
     _jobs[job.job_id] = job
     await _get_upload_queue().put(job)
@@ -1197,14 +1146,6 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
     original_name:    str          = staging.original_name
     filename_stem:    str          = Path(original_name).stem
 
-    # file_key = file_hash_hex + extension → 截取 hash 部分
-    ext            = Path(req.file_key).suffix   # e.g. ".flac"
-    file_hash_hex  = req.file_key[: -len(ext)] if ext else req.file_key
-    try:
-        file_hash_bytes = bytes.fromhex(file_hash_hex)
-    except ValueError:
-        file_hash_bytes = b""
-
     # ── 快速重解析 Mutagen 标签 ────────────────────────────────
     loop = asyncio.get_event_loop()
     tag: dict | None = await loop.run_in_executor(_executor, _parse_tags, save_path)
@@ -1253,7 +1194,6 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
             track_number=track_number,
             lyrics=lyrics,
             stream_url=f"/resource/{req.file_key}",
-            file_hash=file_hash_bytes or None,
             audio_hash=audio_hash_bytes,
             audio_fingerprint=None,   # 由后台指纹任务填充
         )
