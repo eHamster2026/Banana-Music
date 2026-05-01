@@ -14,8 +14,8 @@
       "source": {
         "type": "string",
         "title": "音乐来源",
-        "enum": ["netease", "kuwo", "joox"],
-        "default": "netease"
+        "enum": ["all", "netease", "kuwo", "joox"],
+        "default": "all"
       },
       "bitrate": {
         "type": "string",

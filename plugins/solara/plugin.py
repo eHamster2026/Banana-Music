@@ -2,7 +2,7 @@
 plugins/solara/plugin.py
 Solara Music 插件 — 搜索和下载。
 
-Solara 服务通过 /proxy?types=<TYPE>&... 代理 NetEase / Kuwo / JOOX 等源（由配置项 source 决定）。
+Solara 服务通过 /proxy?types=<TYPE>&... 代理 NetEase / Kuwo / JOOX 等源。
 API 参考：reference/solara 源代码。
 """
 
@@ -32,6 +32,8 @@ MANIFEST = PluginManifest(
     version="1.0.0",
     capabilities=["search"],
 )
+
+_SUPPORTED_SOURCES = ("netease", "kuwo", "joox")
 
 # 支持的音频扩展名（与主程序 upload.py 保持一致）
 _SUPPORTED_EXTS = {".mp3", ".flac", ".m4a", ".aac", ".ogg", ".wav"}
@@ -64,6 +66,17 @@ def _ext_from_url(url: str) -> str:
         if path.endswith(ext):
             return ext
     return ""
+
+
+def _is_kuwo_http_url(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    hostname = (parsed.hostname or "").lower()
+    return parsed.scheme == "http" and (
+        hostname == "kuwo.cn" or hostname.endswith(".kuwo.cn")
+    )
 
 
 def _unwrap_list_payload(data: dict | list) -> list:
@@ -190,7 +203,16 @@ class SolaraPlugin(SearchPlugin):
         return self.ctx.config.get("base_url", "http://172.24.245.77:3001").rstrip("/")
 
     def _source(self) -> str:
-        return self.ctx.config.get("source", "netease")
+        return str(self.ctx.config.get("source", "all")).strip() or "all"
+
+    def _sources(self) -> list[str]:
+        source = self._source().lower()
+        if source == "all":
+            return list(_SUPPORTED_SOURCES)
+        if source in _SUPPORTED_SOURCES:
+            return [source]
+        self.ctx.log("warning", f"Solara 配置 source={source!r} 不支持，已回退为 all")
+        return list(_SUPPORTED_SOURCES)
 
     def _bitrate(self) -> str:
         """
@@ -202,36 +224,45 @@ class SolaraPlugin(SearchPlugin):
             return "999"
         return str(raw)
 
+    def _download_url(self, audio_url: str) -> str:
+        """Mirror Solara Web: Kuwo HTTP audio must be fetched through /proxy?target=..."""
+        if _is_kuwo_http_url(audio_url):
+            target = urllib.parse.quote(audio_url, safe="")
+            return f"{self._base_url()}/proxy?target={target}"
+        return audio_url
+
     def setup(self, ctx) -> None:
         super().setup(ctx)
         url = f"{self._base_url()}/proxy"
-        params = {
-            "s": _sig(),
-            "types": "search",
-            "source": self._source(),
-            "name": "__banana_music_probe__",
-            "count": 1,
-            "pages": 1,
-        }
+        sources = self._sources()
         self.ctx.log(
             "info",
-            f"调用 Solara 连通性探测 GET {url} source={self._source()!r}",
+            f"调用 Solara 连通性探测 GET {url} sources={sources!r}",
         )
-        try:
-            with httpx.Client(timeout=5.0) as client:
-                resp = client.get(url, params=params)
-        except httpx.RequestError as exc:
-            raise PluginUpstreamError(f"Solara 不可达: {exc}") from exc
-
-        if resp.status_code >= 500:
-            raise PluginUpstreamError(
-                f"Solara 服务异常 HTTP {resp.status_code}"
-            )
-
-        self.ctx.log(
-            "info",
-            f"Solara 服务已连接: {self._base_url()} (检测 HTTP {resp.status_code})",
-        )
+        last_status = None
+        with httpx.Client(timeout=5.0) as client:
+            for source in sources:
+                params = {
+                    "s": _sig(),
+                    "types": "search",
+                    "source": source,
+                    "name": "__banana_music_probe__",
+                    "count": 1,
+                    "pages": 1,
+                }
+                try:
+                    resp = client.get(url, params=params)
+                except httpx.RequestError as exc:
+                    raise PluginUpstreamError(f"Solara 不可达: {exc}") from exc
+                last_status = resp.status_code
+                if resp.status_code < 500:
+                    self.ctx.log(
+                        "info",
+                        f"Solara 服务已连接: {self._base_url()} "
+                        f"(检测 source={source!r} HTTP {resp.status_code})",
+                    )
+                    return
+        raise PluginUpstreamError(f"Solara 服务异常 HTTP {last_status}")
 
     # ── 内部 API 调用 ─────────────────────────────────────────
 
@@ -240,7 +271,11 @@ class SolaraPlugin(SearchPlugin):
         url = f"{self._base_url()}/proxy"
         ptype = params.get("types", "?")
         if ptype == "search":
-            detail = f"name={params.get('name', '')[:120]!r} count={params.get('count')}"
+            detail = (
+                f"source={params.get('source')!r} "
+                f"name={params.get('name', '')[:120]!r} "
+                f"count={params.get('count')}"
+            )
         elif ptype == "url":
             detail = f"id={params.get('id')!r} source={params.get('source')!r} br={params.get('br')!r}"
         else:
@@ -269,19 +304,13 @@ class SolaraPlugin(SearchPlugin):
                 f"Solara 响应不是合法 JSON: {exc}"
             ) from exc
 
-    # ── SearchPlugin ──────────────────────────────────────────
-
-    async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
-        async with httpx.AsyncClient() as client:
-            raw = await self._proxy_get(
-                client,
-                types="search",
-                source=self._source(),
-                name=query,
-                count=limit,
-                pages=1,
-            )
-
+    def _parse_search_results(
+        self,
+        raw: dict | list,
+        *,
+        source: str,
+        query: str,
+    ) -> list[SearchResult]:
         if not isinstance(raw, (dict, list)):
             raise PluginParseError(
                 f"Solara 搜索响应类型异常: {type(raw).__name__!r}"
@@ -311,13 +340,13 @@ class SolaraPlugin(SearchPlugin):
         for item in items:
             if not isinstance(item, dict):
                 continue
-            source = item.get("source", self._source())
+            item_source = item.get("source", source)
             track_id = _song_id(item)
             if not track_id:
                 continue
 
             results.append(SearchResult(
-                source_id=f"{source}:{track_id}",
+                source_id=f"{item_source}:{track_id}",
                 title=_song_title(item),
                 artist=_song_artist(item),
                 album=_song_album(item),
@@ -330,6 +359,57 @@ class SolaraPlugin(SearchPlugin):
                 f"搜索返回 {len(items)} 条但均缺少曲目 id: q={query!r}",
             )
             raise PluginParseError("搜索结果条目均缺少可用的曲目 id")
+        return results
+
+    # ── SearchPlugin ──────────────────────────────────────────
+
+    async def _search_source(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        source: str,
+        query: str,
+        limit: int,
+    ) -> list[SearchResult]:
+        raw = await self._proxy_get(
+            client,
+            types="search",
+            source=source,
+            name=query,
+            count=limit,
+            pages=1,
+        )
+        return self._parse_search_results(raw, source=source, query=query)
+
+    async def search(self, query: str, limit: int = 20) -> list[SearchResult]:
+        sources = self._sources()
+        self.ctx.log("info", f"Solara 同时搜索 sources={sources!r} q={query!r}")
+
+        async with httpx.AsyncClient() as client:
+            gathered = await asyncio.gather(
+                *[
+                    self._search_source(
+                        client,
+                        source=source,
+                        query=query,
+                        limit=limit,
+                    )
+                    for source in sources
+                ],
+                return_exceptions=True,
+            )
+
+        results: list[SearchResult] = []
+        errors: list[BaseException] = []
+        for source, value in zip(sources, gathered):
+            if isinstance(value, BaseException):
+                self.ctx.log("warning", f"Solara 源 {source!r} 搜索失败: {value}")
+                errors.append(value)
+                continue
+            results.extend(value)
+
+        if not results and errors:
+            raise errors[0]
         return results
 
     # ── DownloadPlugin ────────────────────────────────────────
@@ -370,11 +450,22 @@ class SolaraPlugin(SearchPlugin):
         if audio_url.startswith("/"):
             audio_url = self._base_url() + audio_url
 
-        self.ctx.log("info", f"下载 {source_id} → {audio_url[:80]}…")
+        download_url = self._download_url(audio_url)
+        if download_url != audio_url:
+            self.ctx.log("info", f"Solara 音频地址已切换为代理下载: {source_id}")
+
+        self.ctx.log("info", f"下载 {source_id} → {download_url[:80]}…")
 
         # 2. 流式下载到临时文件
-        referer = "https://www.kuwo.cn/" if source == "kuwo" else ""
-        headers = {"Referer": referer} if referer else {}
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/124.0.0.0 Safari/537.36"
+            ),
+        }
+        if source == "kuwo" or _is_kuwo_http_url(audio_url):
+            headers["Referer"] = "https://www.kuwo.cn/"
 
         tmp_path: Optional[Path] = None
         try:
@@ -382,12 +473,13 @@ class SolaraPlugin(SearchPlugin):
                 async with httpx.AsyncClient(
                     follow_redirects=True, timeout=120
                 ) as client:
-                    async with client.stream("GET", audio_url, headers=headers) as resp:
+                    async with client.stream("GET", download_url, headers=headers) as resp:
                         resp.raise_for_status()
                         ct = resp.headers.get("content-type", "")
                         ext = (
                             _ext_from_content_type(ct)
                             or _ext_from_url(audio_url)
+                            or _ext_from_url(download_url)
                             or ".mp3"
                         )
                         with tempfile.NamedTemporaryFile(
