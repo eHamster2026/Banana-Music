@@ -23,12 +23,12 @@ import secrets
 import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -969,6 +969,26 @@ class CreateTrackRequest(BaseModel):
 
 
 # ── 端点 ──────────────────────────────────────────────────────
+
+@router.get("/exists-by-hash")
+async def exists_by_hash(
+    audio_hash: str = Query(..., description="32 位十六进制 audio_hash"),
+    db: Session = Depends(get_db),
+):
+    """
+    轻量按 audio_hash 查重。
+
+    匿名可用，供 bulk_import.py 在调用 Ollama 前跳过已存在内容。
+    """
+    value = audio_hash.strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{32}", value):
+        raise HTTPException(400, "audio_hash 必须是 32 位十六进制字符串")
+
+    track = db.query(models.Track).filter(models.Track.audio_hash == bytes.fromhex(value)).first()
+    if not track:
+        return {"exists": False, "track_id": None, "title": None}
+    return {"exists": True, "track_id": track.id, "title": track.title}
+
 
 @router.post("/upload-file")
 async def upload_file_endpoint(

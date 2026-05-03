@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import logging
 import os
@@ -967,6 +968,173 @@ def _auth_headers(api_key: Optional[str], token: Optional[str]) -> dict[str, str
     return {}
 
 
+def _read_flac_md5_for_dedup(path: Path) -> bytes | None:
+    try:
+        from mutagen.flac import FLAC
+
+        md5 = bytes(FLAC(str(path)).info.md5_signature)
+        return md5 if md5 != b"\x00" * 16 else None
+    except Exception:
+        return None
+
+
+def _compute_pcm_md5_for_dedup(path: Path) -> bytes | None:
+    soundfile_exc: BaseException | None = None
+    try:
+        import soundfile as sf
+
+        data, _ = sf.read(str(path), always_2d=True)
+        return hashlib.md5(data.astype("float32").tobytes()).digest()
+    except Exception as exc:
+        soundfile_exc = exc
+
+    try:
+        from pydub import AudioSegment
+
+        seg = AudioSegment.from_file(str(path))
+        raw = seg.set_channels(2).set_sample_width(4).raw_data
+        return hashlib.md5(raw).digest()
+    except Exception as exc:
+        logging.error(
+            "[%s] 无法计算 audio_hash: soundfile=%s: %s pydub=%s: %s",
+            path.name,
+            type(soundfile_exc).__name__ if soundfile_exc else "?",
+            soundfile_exc,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return None
+
+
+def _compute_audio_hash_hex(path: Path) -> str | None:
+    if path.suffix.lower() == ".flac":
+        md5 = _read_flac_md5_for_dedup(path)
+        if md5:
+            return md5.hex()
+
+    md5 = _compute_pcm_md5_for_dedup(path)
+    if md5 is None:
+        return None
+    if len(md5) != 16:
+        logging.error("[%s] audio_hash 长度异常: %s", path.name, len(md5))
+        return None
+    return md5.hex()
+
+
+async def find_duplicate_by_hash(
+    path: Path,
+    *,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    request_timeout: float,
+) -> dict | None:
+    try:
+        import httpx
+    except ImportError:
+        logging.error("请安装 httpx: pip install httpx")
+        return {"file": str(path), "status": "error", "detail": "missing httpx"}
+
+    audio_hash = _compute_audio_hash_hex(path)
+    if not audio_hash:
+        return {"file": str(path), "status": "skipped", "detail": "audio_hash计算失败"}
+
+    base_url = base_url.rstrip("/")
+    headers = _auth_headers(api_key, token)
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        r = await client.get(
+            f"{base_url}/rest/x-banana/tracks/exists-by-hash",
+            params={"audio_hash": audio_hash},
+        )
+        r.raise_for_status()
+        data = r.json()
+
+    if data.get("exists"):
+        track_id = data.get("track_id")
+        logging.info("[%s] 内容重复，track_id=%s", path.name, track_id)
+        return {
+            "file": str(path),
+            "status": "duplicate",
+            "track_id": track_id,
+            "title": data.get("title"),
+            "audio_hash": audio_hash,
+        }
+    return None
+
+
+def _prepare_upload_copy(src: Path, tmp_dir: Path) -> Optional[Path]:
+    dst = tmp_dir / src.name
+    counter = 1
+    while dst.exists():
+        dst = tmp_dir / f"{src.stem}.{counter}{src.suffix}"
+        counter += 1
+    shutil.copy2(src, dst)
+
+    suffix = dst.suffix.lower()
+    if suffix in LOSSLESS_EXTS and suffix != ".flac":
+        if suffix == ".wma" and not _is_wma_lossless(dst):
+            return dst
+        converted = convert_file(
+            dst,
+            tmp_dir,
+            level=5,
+            replaygain=True,
+            tags_only=False,
+            overwrite=True,
+        )
+        return converted
+    return dst
+
+
+async def clean_tags_in_place(path: Path, *, ollama_url: str, model: str, timeout: float) -> tuple[Optional[MetadataResult], dict | None]:
+    raw_tags = _parse_full_tags(path)
+    logging.info("[%s] 查重通过，调用 Ollama (%s)...", path.stem, model)
+    try:
+        llm = await _llm_clean(path.stem, raw_tags, ollama_url, model, timeout)
+    except Exception as exc:
+        _log_unhandled_exception(f"[{path.stem}] LLM 失败，跳过上传", exc)
+        return None, {"file": str(path), "status": "skipped", "detail": "LLM解析失败"}
+
+    if not llm:
+        logging.warning("[%s] LLM 无有效解析结果，跳过上传", path.stem)
+        return None, {"file": str(path), "status": "skipped", "detail": "LLM解析失败"}
+
+    logging.info("[%s] LLM 结果: title=%r artists=%r", path.stem, llm.title, llm.artists)
+    if not _write_cleaned_tags(path, llm):
+        logging.warning("[%s] LLM 清洗结果写入失败，跳过上传", path.stem)
+        return None, {"file": str(path), "status": "skipped", "detail": "LLM清洗结果写入失败"}
+    return llm, None
+
+
+async def _stage_file_to_backend(client, path: Path, base_url: str, poll_interval: float, job_timeout: float) -> dict:
+    logging.info("[%s] 上传文件并查重...", path.name)
+    with path.open("rb") as f:
+        r = await client.post(
+            f"{base_url}/rest/x-banana/tracks/upload-file",
+            files={"file": (path.name, f, "application/octet-stream")},
+        )
+    r.raise_for_status()
+    job_id = r.json()["job_id"]
+
+    deadline = asyncio.get_running_loop().time() + job_timeout
+    while True:
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError(f"上传任务超时: {job_id}")
+        await asyncio.sleep(poll_interval)
+        s = await client.get(f"{base_url}/rest/x-banana/tracks/upload-status/{job_id}")
+        s.raise_for_status()
+        state = s.json()
+        if state.get("state") in ("pending", "processing"):
+            continue
+        if state.get("state") == "error":
+            detail = state.get("detail") or "未知错误"
+            raise RuntimeError(f"上传任务失败: {detail}")
+        if state.get("state") != "done":
+            raise RuntimeError(f"未知上传状态: {state}")
+        return state
+
+
 async def upload_file_to_backend(
     path: Path,
     *,
@@ -988,49 +1156,27 @@ async def upload_file_to_backend(
     headers = _auth_headers(api_key, token)
 
     async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
-        logging.info("[%s] 上传文件...", path.name)
-        with path.open("rb") as f:
-            r = await client.post(
-                f"{base_url}/rest/x-banana/tracks/upload-file",
-                files={"file": (path.name, f, "application/octet-stream")},
-            )
-        r.raise_for_status()
-        job_id = r.json()["job_id"]
+        state = await _stage_file_to_backend(client, path, base_url, poll_interval, job_timeout)
+        if state.get("status") == "duplicate":
+            track_id = state.get("track_id")
+            logging.info("[%s] 内容重复，track_id=%s", path.name, track_id)
+            return {"file": str(path), "status": "duplicate", "track_id": track_id, "title": state.get("title")}
 
-        deadline = asyncio.get_running_loop().time() + job_timeout
-        while True:
-            if asyncio.get_running_loop().time() >= deadline:
-                raise TimeoutError(f"上传任务超时: {job_id}")
-            await asyncio.sleep(poll_interval)
-            s = await client.get(f"{base_url}/rest/x-banana/tracks/upload-status/{job_id}")
-            s.raise_for_status()
-            state = s.json()
-            if state.get("state") in ("pending", "processing"):
-                continue
-            if state.get("state") == "error":
-                detail = state.get("detail") or "未知错误"
-                raise RuntimeError(f"上传任务失败: {detail}")
-            if state.get("state") != "done":
-                raise RuntimeError(f"未知上传状态: {state}")
+        file_key = state.get("file_key")
+        if not file_key:
+            raise RuntimeError(f"上传完成但缺少 file_key: {state}")
 
-            if state.get("status") == "duplicate":
-                track_id = state.get("track_id")
-                logging.info("[%s] 内容重复，track_id=%s", path.name, track_id)
-                return {"file": str(path), "status": "duplicate", "track_id": track_id, "title": state.get("title")}
+        payload = {"file_key": file_key, "parse_metadata": parse_metadata}
 
-            file_key = state.get("file_key")
-            if not file_key:
-                raise RuntimeError(f"上传完成但缺少 file_key: {state}")
-
-            logging.info("[%s] 写入曲库...", path.name)
-            created = await client.post(
-                f"{base_url}/rest/x-banana/tracks/create",
-                json={"file_key": file_key, "parse_metadata": parse_metadata},
-            )
-            created.raise_for_status()
-            data = created.json()
-            logging.info("[%s] 完成，status=%s track_id=%s", path.name, data.get("status"), data.get("track_id"))
-            return {"file": str(path), **data}
+        logging.info("[%s] 写入曲库...", path.name)
+        created = await client.post(
+            f"{base_url}/rest/x-banana/tracks/create",
+            json=payload,
+        )
+        created.raise_for_status()
+        data = created.json()
+        logging.info("[%s] 完成，status=%s track_id=%s", path.name, data.get("status"), data.get("track_id"))
+        return {"file": str(path), **data}
 
 
 async def login_to_backend(
@@ -1181,23 +1327,51 @@ async def _run_process(args: argparse.Namespace) -> None:
                 replaygain=args.replaygain,
                 overwrite=args.overwrite,
                 skip_convert=args.skip_convert,
-                skip_llm=args.skip_llm,
+                skip_llm=args.skip_llm or args.upload,
                 ollama_url=args.ollama_url.rstrip("/"),
                 ollama_model=args.model,
                 ollama_timeout=args.timeout,
             )
             if args.upload and not result.get("error"):
                 try:
-                    result["upload_result"] = await upload_file_to_backend(
-                        Path(result["final_file"]),
+                    final_path = Path(result["final_file"])
+                    duplicate = await find_duplicate_by_hash(
+                        final_path,
                         base_url=args.base_url,
                         api_key=args.api_key,
                         token=upload_token,
-                        parse_metadata=args.parse_metadata,
+                        request_timeout=args.request_timeout,
+                    )
+                    if duplicate:
+                        result["upload_result"] = duplicate
+                        results.append(result)
+                        continue
+
+                    llm_result: Optional[MetadataResult] = None
+                    if not args.skip_llm:
+                        llm_result, skipped = await clean_tags_in_place(
+                            final_path,
+                            ollama_url=args.ollama_url.rstrip("/"),
+                            model=args.model,
+                            timeout=args.timeout,
+                        )
+                        if skipped:
+                            result["upload_result"] = skipped
+                            results.append(result)
+                            continue
+
+                    result["upload_result"] = await upload_file_to_backend(
+                        final_path,
+                        base_url=args.base_url,
+                        api_key=args.api_key,
+                        token=upload_token,
+                        parse_metadata=False if llm_result is not None else args.parse_metadata,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
                     )
+                    if llm_result is not None:
+                        result["upload_result"]["llm_result"] = asdict(llm_result)
                 except Exception as exc:
                     _log_unhandled_exception(f"[{result['final_file']}] 上传失败", exc)
                     result["upload_result"] = {"status": "error", "detail": str(exc)}
@@ -1215,31 +1389,30 @@ async def _run_upload(args: argparse.Namespace) -> None:
         tmp_dir = Path(tmp)
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             try:
-                dst = tmp_dir / path.name
-                counter = 1
-                while dst.exists():
-                    dst = tmp_dir / f"{path.stem}.{counter}{path.suffix}"
-                    counter += 1
-                shutil.copy2(path, dst)
-
-                raw_tags = _parse_full_tags(dst)
-                logging.info("[%s] 上传前调用 Ollama (%s)...", path.stem, args.model)
-                try:
-                    llm = await _llm_clean(dst.stem, raw_tags, args.ollama_url.rstrip("/"), args.model, args.timeout)
-                except Exception as exc:
-                    _log_unhandled_exception(f"[{path.stem}] LLM 失败，跳过上传", exc)
-                    results.append({"file": str(path), "status": "skipped", "detail": "LLM解析失败"})
+                dst = _prepare_upload_copy(path, tmp_dir)
+                if dst is None:
+                    results.append({"source_file": str(path), "status": "skipped", "detail": "预处理失败"})
                     continue
 
-                if not llm:
-                    logging.warning("[%s] LLM 无有效解析结果，跳过上传", path.stem)
-                    results.append({"file": str(path), "status": "skipped", "detail": "LLM解析失败"})
+                duplicate = await find_duplicate_by_hash(
+                    dst,
+                    base_url=args.base_url,
+                    api_key=args.api_key,
+                    token=upload_token,
+                    request_timeout=args.request_timeout,
+                )
+                if duplicate:
+                    results.append({"source_file": str(path), **duplicate})
                     continue
 
-                logging.info("[%s] LLM 结果: title=%r artists=%r", path.stem, llm.title, llm.artists)
-                if not _write_cleaned_tags(dst, llm):
-                    logging.warning("[%s] LLM 清洗结果写入失败，跳过上传", path.stem)
-                    results.append({"file": str(path), "status": "skipped", "detail": "LLM清洗结果写入失败"})
+                llm, skipped = await clean_tags_in_place(
+                    dst,
+                    ollama_url=args.ollama_url.rstrip("/"),
+                    model=args.model,
+                    timeout=args.timeout,
+                )
+                if skipped:
+                    results.append({"source_file": str(path), **skipped})
                     continue
 
                 uploaded = await upload_file_to_backend(
@@ -1247,7 +1420,7 @@ async def _run_upload(args: argparse.Namespace) -> None:
                     base_url=args.base_url,
                     api_key=args.api_key,
                     token=upload_token,
-                    parse_metadata=args.parse_metadata,
+                    parse_metadata=False,
                     poll_interval=args.poll_interval,
                     job_timeout=args.job_timeout,
                     request_timeout=args.request_timeout,
@@ -1297,7 +1470,7 @@ async def _amain(argv: Optional[list[str]] = None) -> None:
     _add_common_options(p_process)
     p_process.set_defaults(func=_run_process)
 
-    p_upload = subparsers.add_parser("upload", help="LLM 清洗临时副本后上传到 Banana Music 后端")
+    p_upload = subparsers.add_parser("upload", help="先上传查重；非重复时 LLM 清洗后写入 Banana Music 后端")
     p_upload.add_argument("files", nargs="+", metavar="FILE", help="输入文件路径")
     _add_llm_options(p_upload)
     _add_upload_options(p_upload)

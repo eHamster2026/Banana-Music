@@ -195,6 +195,8 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 
 重复内容会在上传处理阶段按 `audio_hash` 识别，并返回 `{ "state": "done", "status": "duplicate", "track_id": 123, "title": "..." }`。`POST /rest/x-banana/tracks/create` 请求体必须包含 `{ "file_key": "..." }`，可选 `parse_metadata` 默认为 `true`。元数据由服务端从 `upload_staging` 与文件标签解析；`parse_metadata: true` 时入库后会异步执行 `parse_upload` 流水线。
 
+批量导入工具可在调用 LLM 前先用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=<32位hex>` 查询是否重复。该接口匿名可用，命中返回 `{ "exists": true, "track_id": 123, "title": "..." }`，未命中返回 `{ "exists": false, "track_id": null, "title": null }`。
+
 ### 播放队列扩展
 
 | 方法 | 路径 | 说明 |

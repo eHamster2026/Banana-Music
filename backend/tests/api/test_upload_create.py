@@ -32,6 +32,70 @@ def _parse_task_count() -> int:
         db.close()
 
 
+def _create_track_with_hash(audio_hash: bytes, title: str = "Existing Title") -> int:
+    db = SessionLocal()
+    try:
+        artist = models.Artist(
+            name="Existing Artist",
+            art_color="art-1",
+            bio="",
+            monthly_listeners=0,
+        )
+        db.add(artist)
+        db.flush()
+        track = models.Track(
+            title=title,
+            artist_id=artist.id,
+            duration_sec=123,
+            stream_url="/resource/existing.flac",
+            audio_hash=audio_hash,
+        )
+        db.add(track)
+        db.commit()
+        return track.id
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_exists_by_hash_is_anonymous_and_returns_track(client):
+    audio_hash = bytes.fromhex("00112233445566778899aabbccddeeff")
+    track_id = _create_track_with_hash(audio_hash)
+
+    r = await client.get(
+        "/rest/x-banana/tracks/exists-by-hash",
+        params={"audio_hash": audio_hash.hex()},
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {
+        "exists": True,
+        "track_id": track_id,
+        "title": "Existing Title",
+    }
+
+
+@pytest.mark.asyncio
+async def test_exists_by_hash_returns_false_for_missing_hash(client):
+    r = await client.get(
+        "/rest/x-banana/tracks/exists-by-hash",
+        params={"audio_hash": "ffeeddccbbaa99887766554433221100"},
+    )
+
+    assert r.status_code == 200
+    assert r.json() == {"exists": False, "track_id": None, "title": None}
+
+
+@pytest.mark.asyncio
+async def test_exists_by_hash_rejects_invalid_hash(client):
+    r = await client.get(
+        "/rest/x-banana/tracks/exists-by-hash",
+        params={"audio_hash": "not-a-hash"},
+    )
+
+    assert r.status_code == 400
+
+
 @pytest.mark.asyncio
 async def test_create_track_parse_metadata_false_skips_parse_upload_task(
     client, monkeypatch, tmp_path
