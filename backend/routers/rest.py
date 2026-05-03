@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import func, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from config import settings
@@ -16,7 +17,6 @@ from routers import (
     home,
     plugins as plugins_router,
     queue as queue_router,
-    search,
     upload,
 )
 from plugins.errors import PluginParseError, PluginUpstreamError
@@ -25,6 +25,25 @@ from services.plugin_search import run_plugin_search_flat
 
 
 router = APIRouter(prefix="/rest", tags=["Rest"])
+
+_PLAYLIST_NAME_UNIQUE_INDEX = "uq_playlists_user_id_lower_name"
+
+
+def _is_playlist_name_unique_violation(exc: IntegrityError) -> bool:
+    raw = str(getattr(exc, "orig", exc)).lower()
+    if "unique" not in raw:
+        return False
+    return _PLAYLIST_NAME_UNIQUE_INDEX.lower() in raw or "playlists" in raw
+
+
+def _commit_or_duplicate_playlist_name(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        if _is_playlist_name_unique_violation(exc):
+            raise HTTPException(409, "已存在同名歌单")
+        raise
 
 
 def _playlist_out(p: models.Playlist) -> schemas.PlaylistOut:
@@ -582,7 +601,7 @@ def create_playlist(
         user_id=user.id,
     )
     db.add(playlist)
-    db.commit()
+    _commit_or_duplicate_playlist_name(db)
     db.refresh(playlist)
     return _playlist_out(playlist)
 
@@ -610,7 +629,7 @@ def update_playlist(
         playlist.description = body.description
     if body.art_color is not None:
         playlist.art_color = body.art_color
-    db.commit()
+    _commit_or_duplicate_playlist_name(db)
     db.refresh(playlist)
     return _playlist_out(playlist)
 
@@ -698,7 +717,6 @@ def get_play_queue(
 x_banana = APIRouter(prefix="/x-banana", tags=["Banana Extensions"])
 x_banana.include_router(auth.router)
 x_banana.include_router(home.router)
-x_banana.include_router(search.router)
 x_banana.include_router(upload.router)
 x_banana.include_router(admin.router)
 x_banana.include_router(plugins_router.router)

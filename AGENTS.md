@@ -29,7 +29,7 @@ banana-music/
 │   ├── schema_version.py  # SCHEMA_VERSION 常量
 │   ├── schemas.py      # Pydantic 请求/响应模型
 │   ├── deps.py         # 依赖注入（get_db, get_current_user, get_admin_user）
-│   ├── routers/        # 路由（12 个模块）
+│   ├── routers/        # 路由（/rest 兼容 API + x-banana 扩展）
 │   ├── services/       # 业务逻辑（pipeline, enrich, artist_names, …）
 │   ├── plugins/        # 插件基础设施（base, loader, context, errors）
 │   └── tests/          # pytest 测试集
@@ -206,7 +206,7 @@ plugins/<id>/
 - 支持 `Authorization: Bearer <access_token>` 与 `X-API-Key: am_<your_key>` 两种认证方式；与后端 `deps` 一致，Bearer 优先
 - API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest/x-banana/admin/*`
 - 当前公开 API 统一挂载在 `/rest/*`；项目专属能力挂载在 `/rest/x-banana/*`
-- 无需认证的只读端点：`GET /rest/search3`、`GET /rest/x-banana/search/suggestions`
+- 无需认证的只读端点：`GET /rest/search3`
 - `GET /rest/search3` 未登录时仅返回本地库结果；已登录且启用搜索插件时，响应可能额外包含 `plugin_hits`
 
 ### 常用工具端点

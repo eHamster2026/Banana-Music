@@ -167,12 +167,11 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 }
 ```
 
-### 首页与搜索建议
+### 首页
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/rest/x-banana/home` | 当前前端首页聚合数据 |
-| GET | `/rest/x-banana/search/suggestions?q=<前缀>` | 搜索建议 |
 
 ### 上传
 
@@ -201,7 +200,6 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | POST | `/rest/x-banana/queue/command` | 当前前端完整队列命令；返回队列状态 |
-| GET | `/rest/x-banana/queue/events?token=<jwt>&device_id=<id>` | SSE 设备同步 |
 
 `/rest/x-banana/queue/command` 支持的命令见 `schemas.QueueCommand`：`play`、`pause`、`seek`、`next`、`prev`、`play_now`、`play_next`、`append`、`replace`、`remove`、`set_repeat`、`set_shuffle`、`activate`、`sync_position`。
 
@@ -227,8 +225,7 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 | GET | `/rest/x-banana/admin/tracks` | 曲目列表；支持 `skip`、`limit`、`q`、`missing_metadata` |
 | PUT | `/rest/x-banana/admin/tracks/{track_id}` | 更新单曲元数据 |
 | POST | `/rest/x-banana/admin/tracks/batch-update` | 批量更新（最多 50 条/次） |
-| DELETE | `/rest/x-banana/admin/tracks/{track_id}/file` | 仅删除磁盘文件，保留元数据 |
-| DELETE | `/rest/x-banana/admin/tracks/{track_id}` | 删除曲目记录及文件 |
+| DELETE | `/rest/x-banana/admin/tracks/{track_id}` | 删除曲目记录、文件及关联数据 |
 | GET | `/rest/x-banana/admin/users` | 用户列表 |
 | POST | `/rest/x-banana/admin/users` | 创建用户 |
 | PUT | `/rest/x-banana/admin/users/{user_id}` | 更新用户 |

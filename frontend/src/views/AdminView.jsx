@@ -28,7 +28,7 @@ function Confirm({ msg, onOk, onCancel }) {
 }
 
 // ── 曲目编辑行内表单 ──────────────────────────────────────────
-function TrackEditForm({ track, token, onSave, onCancel }) {
+function TrackEditForm({ track, token, onSave, onCancel, onDeleteTrack }) {
   const { t } = useTranslation()
   const [form, setForm] = useState({
     title: track.title,
@@ -129,12 +129,23 @@ function TrackEditForm({ track, token, onSave, onCancel }) {
           }}
         />
       </label>
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-        <button className="btn-secondary" onClick={handleLookupMetadata} disabled={lookupLoading} style={{ fontSize: 13 }}>
-          {lookupLoading ? t('admin.looking') : t('admin.lookupBtn')}
-        </button>
-        <button className="btn-secondary" onClick={onCancel} style={{ fontSize: 13 }}>{t('admin.cancel')}</button>
-        <button className="btn-primary" onClick={handleSave} style={{ fontSize: 13 }}>{t('admin.save', {defaultValue: t('common.save')})}</button>
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn-secondary"
+            onClick={() => onDeleteTrack(track)}
+            style={{ fontSize: 13, borderColor: 'rgba(231,76,60,0.4)', color: '#e74c3c' }}
+          >
+            {t('admin.deleteTrack')}
+          </button>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+          <button className="btn-secondary" onClick={handleLookupMetadata} disabled={lookupLoading} style={{ fontSize: 13 }}>
+            {lookupLoading ? t('admin.looking') : t('admin.lookupBtn')}
+          </button>
+          <button className="btn-secondary" onClick={onCancel} style={{ fontSize: 13 }}>{t('admin.cancel')}</button>
+          <button className="btn-primary" onClick={handleSave} style={{ fontSize: 13 }}>{t('admin.save', {defaultValue: t('common.save')})}</button>
+        </div>
       </div>
       {candidates.length > 0 && (
         <div style={{
@@ -216,20 +227,6 @@ function TracksTab({ token }) {
     showToast(t('common.save'))
   }
 
-  function askDeleteFile(track) {
-    setConfirm({
-      msg: t('admin.deleteFileConfirm', { title: displayTrackTitle(track) }),
-      onOk: async () => {
-        setConfirm(null)
-        try {
-          await apiFetch(`/rest/x-banana/admin/tracks/${track.id}/file`, { method: 'DELETE' }, token)
-          setTracks(ts => ts.map(t => t.id === track.id ? { ...t, stream_url: null } : t))
-          showToast(t('admin.fileDeleted'))
-        } catch (e) { showToast(t('admin.deleteFailed') + e.message) }
-      },
-    })
-  }
-
   function askDeleteTrack(track) {
     setConfirm({
       msg: t('admin.deleteTrackConfirm', { title: displayTrackTitle(track) }),
@@ -254,7 +251,7 @@ function TracksTab({ token }) {
     { label: t('admin.colAlbum'), width: 200 },
     { label: t('admin.colDuration'), width: 86 },
     { label: t('admin.colFile'), width: 88 },
-    { label: t('admin.colActions'), width: 250 },
+    { label: t('admin.colActions'), width: 100 },
   ]
   const ellipsisCell = {
     overflow: 'hidden',
@@ -289,7 +286,7 @@ function TracksTab({ token }) {
       </div>
 
       <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: 1140, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', minWidth: 990, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
           <colgroup>
             {trackHeaders.map((h, idx) => (
               <col key={`${h.label}-${idx}`} style={{ width: h.width }} />
@@ -359,20 +356,8 @@ function TracksTab({ token }) {
                   <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
                     <button
                       onClick={() => setEditingId(editingId === track.id ? null : track.id)}
-                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'var(--text)', fontSize: 12, marginRight: 6 }}>
+                      style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: 'var(--text)', fontSize: 12 }}>
                       {t('admin.edit', {defaultValue: t('common.edit')})}
-                    </button>
-                    {track.stream_url && (
-                      <button
-                        onClick={() => askDeleteFile(track)}
-                        style={{ background: 'none', border: '1px solid rgba(231,76,60,0.4)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: '#e74c3c', fontSize: 12, marginRight: 6 }}>
-                        {t('admin.deleteFile')}
-                      </button>
-                    )}
-                    <button
-                      onClick={() => askDeleteTrack(track)}
-                      style={{ background: 'rgba(231,76,60,0.15)', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', color: '#e74c3c', fontSize: 12 }}>
-                      {t('admin.deleteTrack')}
                     </button>
                   </td>
                 </tr>
@@ -384,6 +369,7 @@ function TracksTab({ token }) {
                         token={token}
                         onSave={handleSaved}
                         onCancel={() => setEditingId(null)}
+                        onDeleteTrack={askDeleteTrack}
                       />
                     </td>
                   </tr>

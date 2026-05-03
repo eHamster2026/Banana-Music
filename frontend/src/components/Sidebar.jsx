@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { useAuth } from '../contexts/AuthContext'
@@ -12,7 +12,7 @@ export default function Sidebar() {
   const { setShowLoginModal, setShowCreatePl } = useModal()
   const [playlists, setPlaylists] = useState([])
 
-  useEffect(() => {
+  const reloadPlaylists = useCallback(() => {
     if (token) {
       apiFetch('/rest/getPlaylists', {}, token)
         .then(data => setPlaylists(data || []))
@@ -21,6 +21,15 @@ export default function Sidebar() {
       setPlaylists([])
     }
   }, [token])
+
+  useEffect(() => {
+    reloadPlaylists()
+  }, [reloadPlaylists])
+
+  useEffect(() => {
+    window.addEventListener('playlistsUpdated', reloadPlaylists)
+    return () => window.removeEventListener('playlistsUpdated', reloadPlaylists)
+  }, [reloadPlaylists])
 
   function handleUserClick() {
     if (token) logout()

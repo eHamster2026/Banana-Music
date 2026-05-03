@@ -1,6 +1,6 @@
 # 🍌 Banana Music
 
-版本 0.2 · 本地音乐管理 + 流媒体播放 Web 应用
+版本 0.29 · 本地音乐管理 + 流媒体播放 Web 应用
 
 自托管的音乐库系统：上传音频文件后自动完成格式转码、Chromaprint 指纹识别和 LLM 元数据清洗，通过 Web 界面播放、管理和搜索整个音乐库，并可通过插件扩展在线搜索与下载能力。
 
@@ -41,7 +41,7 @@
 - 播放列表创建与编辑
 
 ### 管理后台
-- 批量编辑曲目元数据
+- 批量编辑曲目元数据，曲目删除统一删除记录、文件和关联数据
 - 插件管理：启用 / 禁用 / 在线配置各插件
 - 系统状态监控、用户管理、API Key 生成
 
@@ -69,7 +69,7 @@ banana-music/
 ├── backend/            # FastAPI 应用
 │   ├── main.py         # 启动入口、建表、schema 版本检查
 │   ├── models.py       # SQLAlchemy ORM（19 张表）
-│   ├── routers/        # 12 个路由模块（auth, upload, tracks, search 等）
+│   ├── routers/        # 路由模块（/rest 兼容 API + x-banana 扩展）
 │   ├── services/       # 业务逻辑（pipeline, enrich, artist_names 等）
 │   ├── plugins/        # 插件基础设施（base, loader, context, errors）
 │   └── tests/          # pytest 测试集

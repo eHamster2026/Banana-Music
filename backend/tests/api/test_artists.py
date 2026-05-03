@@ -87,6 +87,6 @@ async def test_artist_albums_include_featured_artist_credits(client):
     finally:
         db.close()
 
-    r = await client.get(f"/artists/{featured_id}/albums")
+    r = await client.get(f"/rest/getArtistAlbums?id={featured_id}")
     assert r.status_code == 200
     assert [item["id"] for item in r.json()] == [album_id]

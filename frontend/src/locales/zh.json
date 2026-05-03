@@ -309,7 +309,6 @@
     "playTrack": "播放",
     "hasFile": "有文件",
     "noFile": "无文件",
-    "deleteFile": "删文件",
     "deleteTrack": "删除",
     "prevPage": "上一页",
     "nextPage": "下一页",
@@ -363,15 +362,13 @@
     "pluginSaveBtn": "保存配置"
     ,"loadFailed": "加载失败：",
     "loadUsersFailed": "加载用户失败：",
-    "deleteFileConfirm": "删除《{{title}}》的音频文件？元数据将保留，但无法播放。",
     "deleteTrackConfirm": "彻底删除《{{title}}》？此操作不可撤销，将同时删除文件和所有关联数据。",
-    "fileDeleted": "文件已删除",
     "trackDeleted": "曲目已删除",
     "pluginReloaded": "重载",
     "pageTracksTitle": "曲目管理",
     "pageUsersTitle": "用户管理",
     "pagePluginsTitle": "插件管理",
-    "pageTracksSubtitle": "编辑元数据、删除文件或记录",
+    "pageTracksSubtitle": "编辑元数据或删除曲目",
     "pageUsersSubtitle": "管理用户权限与账号",
     "pagePluginsSubtitle": "管理示例插件、配置项与启停状态"
   }

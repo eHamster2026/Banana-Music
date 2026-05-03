@@ -23,25 +23,15 @@ routers/queue.py
   set_shuffle — 切换随机
 """
 
-import asyncio
-import json
 import time
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from database import SessionLocal
 from deps import get_db, get_current_user
 import models, schemas
-from auth_utils import decode_token
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
-
-# ── 内存状态缓存（供 SSE 轮询）─────────────────────────────────
-# user_id -> (updated_at: int, state_json: str)
-_cache: dict[int, tuple[int, str]] = {}
 
 
 # ── 工具函数 ──────────────────────────────────────────────────
@@ -102,23 +92,6 @@ def _serialize(queue: models.PlayQueue) -> dict:
             }
             for it in items
         ],
-    }
-
-
-def _push_cache(user_id: int, state: dict):
-    _cache[user_id] = (state["updated_at"], json.dumps(state))
-
-
-def _sse_payload_for_device(state: dict, device_id: str) -> dict:
-    """Only the active device receives the full playback state."""
-    if state.get("active_device") == device_id:
-        return {"type": "state", "data": state}
-    return {
-        "type": "inactive",
-        "data": {
-            "active_device": state.get("active_device"),
-            "updated_at": state.get("updated_at"),
-        },
     }
 
 
@@ -271,17 +244,6 @@ def _process(queue: models.PlayQueue, cmd: schemas.QueueCommand, db: Session):
     db.commit()
 
 
-# ── REST 端点 ─────────────────────────────────────────────────
-
-@router.get("", response_model=schemas.QueueStateOut)
-def get_queue(
-    db: Session = Depends(get_db),
-    user: models.User = Depends(get_current_user),
-):
-    queue = _get_or_create_queue(db, user.id)
-    return _serialize(queue)
-
-
 @router.post("/command", response_model=schemas.QueueStateOut)
 def queue_command(
     cmd: schemas.QueueCommand,
@@ -290,64 +252,4 @@ def queue_command(
 ):
     queue = _get_or_create_queue(db, user.id)
     _process(queue, cmd, db)
-    state = _serialize(queue)
-    _push_cache(user.id, state)
-    return state
-
-
-# ── SSE 端点 ──────────────────────────────────────────────────
-
-@router.get("/events")
-async def queue_events(request: Request, token: str = Query(...), device_id: str = Query(...)):
-    """
-    Server-Sent Events 流，每 2 秒检查状态变化并推送。
-    token 作为 query 参数传入（EventSource 不支持自定义 Header）。
-
-    使用独立短事务：创建默认队列后 commit 并关闭连接，再返回流。
-    避免依赖注入的 Session 与长连接生命周期纠缠，并确保首条 INSERT 真正落库。
-    """
-    payload = decode_token(token)
-    if not payload:
-        raise HTTPException(401, "Token 无效")
-    try:
-        user_id = int(payload.get("sub"))
-    except (TypeError, ValueError):
-        raise HTTPException(401, "Token 格式错误")
-
-    db = SessionLocal()
-    try:
-        user = db.query(models.User).filter(models.User.id == user_id).first()
-        if not user:
-            raise HTTPException(401, "用户不存在")
-
-        queue = _get_or_create_queue(db, user_id)
-        initial = _serialize(queue)
-        db.commit()
-    finally:
-        db.close()
-
-    _push_cache(user_id, initial)
-
-    async def generator():
-        last_ts = initial["updated_at"]
-        yield f"data: {json.dumps(_sse_payload_for_device(initial, device_id))}\n\n"
-
-        while True:
-            await asyncio.sleep(2)
-            if await request.is_disconnected():
-                break
-            entry = _cache.get(user_id)
-            if entry and entry[0] > last_ts:
-                last_ts = entry[0]
-                yield f"data: {json.dumps(_sse_payload_for_device(json.loads(entry[1]), device_id))}\n\n"
-            else:
-                yield ": ping\n\n"
-
-    return StreamingResponse(
-        generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
+    return _serialize(queue)
