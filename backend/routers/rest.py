@@ -66,6 +66,34 @@ def _cover_file_from_path(cover_path: str | None) -> Path | None:
     return Path(__file__).parent.parent.parent / "data" / "covers" / cover_path
 
 
+def _mark_track_likes(
+    db: Session,
+    tracks: list[models.Track],
+    user: Optional[models.User],
+) -> list[models.Track]:
+    if not tracks:
+        return tracks
+
+    liked_ids: set[int] = set()
+    if user is not None:
+        track_ids = [track.id for track in tracks]
+        liked_ids = {
+            row[0]
+            for row in (
+                db.query(models.UserTrackLike.track_id)
+                .filter(
+                    models.UserTrackLike.user_id == user.id,
+                    models.UserTrackLike.track_id.in_(track_ids),
+                )
+                .all()
+            )
+        }
+
+    for track in tracks:
+        track.is_liked = track.id in liked_ids
+    return tracks
+
+
 # ── System-ish endpoints ────────────────────────────────────────
 
 
@@ -89,6 +117,7 @@ def get_songs(
     sort: str = Query("default", pattern="^(default|recent)$"),
     local: bool = Query(False),
     db: Session = Depends(get_db),
+    user: Optional[models.User] = Depends(get_optional_user),
 ):
     q = db.query(models.Track)
     if local:
@@ -97,7 +126,8 @@ def get_songs(
         q = q.order_by(models.Track.created_at.desc().nullslast(), models.Track.id.desc())
     else:
         q = q.order_by(models.Track.id.desc())
-    return q.offset(skip).limit(limit).all()
+    tracks = q.offset(skip).limit(limit).all()
+    return _mark_track_likes(db, tracks, user)
 
 
 @router.get("/getSongCount")

@@ -124,6 +124,8 @@ export default function AlbumView({ id }) {
           <div>{t('common.colDuration')}</div>
           <div />
           <div />
+          <div />
+          <div />
         </div>
         {tracks.map((track, i) => (
           <TrackRow

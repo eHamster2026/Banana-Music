@@ -80,6 +80,22 @@ export default function ArtistView({ id }) {
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'rgba(255,255,255,0.7)', marginBottom: 8 }}>{t('artists.typeLabel')}</div>
             <div style={{ fontSize: 42, fontWeight: 900, letterSpacing: '-1px' }}>{artist.name}</div>
             {artist.genre && <div style={{ fontSize: 14, color: 'rgba(255,255,255,0.6)', marginTop: 6 }}>{artist.genre}</div>}
+            {tracks.length > 0 && (
+              <div className="detail-actions" style={{ marginTop: 18 }}>
+                <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
+                  <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M3.5 2.5l10 5.5-10 5.5z"/>
+                  </svg>
+                  {t('common.play')}
+                </button>
+                <button
+                  className="btn-secondary"
+                  onClick={() => { setContextQueue(tracks); playFromContext(Math.floor(Math.random() * tracks.length)) }}
+                >
+                  {t('common.shuffle')}
+                </button>
+              </div>
+            )}
           </div>
           <button
             className={`detail-lib-btn${inLibrary ? ' active' : ''}`}
@@ -106,7 +122,7 @@ export default function ArtistView({ id }) {
               <div style={{ textAlign: 'right', paddingRight: 14 }}>#</div>
               <div>{t('common.colTitle')}</div>
               <div>{t('common.colDuration')}</div>
-              <div /><div />
+              <div /><div /><div /><div />
             </div>
             {tracks.map((track, i) => (
               <TrackRow

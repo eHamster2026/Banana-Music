@@ -213,7 +213,11 @@
   "queue": {
     "title": "Queue",
     "close": "Close",
-    "empty": "Queue is empty"
+    "empty": "Queue is empty",
+    "playNextTooltip": "Play next",
+    "appendTooltip": "Add to end of queue",
+    "addedNext": "Added to play next",
+    "addedEnd": "Added to queue"
   },
   "upload": {
     "queueTitle": "Upload queue",

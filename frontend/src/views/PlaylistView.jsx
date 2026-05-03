@@ -7,7 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import { apiFetch, fmtTime } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
 
-const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 44px 36px'
+const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px'
 
 export default function PlaylistView({ id }) {
   const { t } = useTranslation()
@@ -110,14 +110,14 @@ export default function PlaylistView({ id }) {
         </div>
       ) : (
         <div style={{ padding: '0 12px' }}>
-          {/* ordered header: # + title + artist + album + duration + like + add */}
+          {/* ordered header: # + title + artist + album + duration + queue actions + like + remove/add */}
           <div className="local-track-header" style={{ gridTemplateColumns: GRID_ORDERED }}>
             <div style={{ textAlign: 'right', paddingRight: 14 }}>#</div>
             <div>{t('common.colTitle')}</div>
             <div>{t('common.colArtist')}</div>
             <div>{t('common.colAlbum')}</div>
             <div>{t('common.colDuration')}</div>
-            <div /><div />
+            <div /><div /><div /><div />
           </div>
           {tracks.map((track, i) => (
             <LocalTrackRow

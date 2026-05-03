@@ -48,6 +48,7 @@ class TrackOut(TrackBase):
     album: Optional[AlbumOut] = None
     artist: ArtistOut
     featured_artists: List[ArtistOut] = []
+    is_liked: bool = False
     model_config = {"from_attributes": True}
 
 class TrackDetail(TrackOut):

@@ -42,6 +42,20 @@ function resolveTitleState(state, t) {
   return state?.title || ''
 }
 
+function getMainScrollTop() {
+  return document.getElementById('main')?.scrollTop || 0
+}
+
+function restoreMainScroll(scrollTop = 0) {
+  const delays = [0, 16, 50, 120, 250, 500, 900]
+  for (const delay of delays) {
+    setTimeout(() => {
+      const main = document.getElementById('main')
+      if (main) main.scrollTop = scrollTop
+    }, delay)
+  }
+}
+
 export function NavProvider({ children }) {
   const { t } = useTranslation()
   const [currentView, setCurrentView] = useState('home')
@@ -57,32 +71,50 @@ export function NavProvider({ children }) {
   }, [])
 
   function navigate(viewName, props = {}, title = null) {
-    setNavStack(prev => [...prev, { view: currentView, props: currentViewProps, titleState: topbarTitleState }])
+    setNavStack(prev => [...prev, {
+      view: currentView,
+      props: currentViewProps,
+      titleState: topbarTitleState,
+      scrollTop: getMainScrollTop(),
+    }])
     setNavFwdStack([])
     setCurrentView(viewName)
     setCurrentViewProps(props)
     const defaultTitle = getViewTitle(viewName, t)
     setTopbarTitleState(title && title !== defaultTitle ? customTitleState(title) : viewTitleState(viewName))
+    restoreMainScroll(0)
   }
 
   function navBack() {
     if (navStack.length === 0) return
     const prev = navStack[navStack.length - 1]
-    setNavFwdStack(f => [{ view: currentView, props: currentViewProps, titleState: topbarTitleState }, ...f])
+    setNavFwdStack(f => [{
+      view: currentView,
+      props: currentViewProps,
+      titleState: topbarTitleState,
+      scrollTop: getMainScrollTop(),
+    }, ...f])
     setNavStack(s => s.slice(0, -1))
     setCurrentView(prev.view)
     setCurrentViewProps(prev.props)
     setTopbarTitleState(prev.titleState || customTitleState(prev.title || ''))
+    restoreMainScroll(prev.scrollTop || 0)
   }
 
   function navForward() {
     if (navFwdStack.length === 0) return
     const next = navFwdStack[0]
-    setNavStack(s => [...s, { view: currentView, props: currentViewProps, titleState: topbarTitleState }])
+    setNavStack(s => [...s, {
+      view: currentView,
+      props: currentViewProps,
+      titleState: topbarTitleState,
+      scrollTop: getMainScrollTop(),
+    }])
     setNavFwdStack(f => f.slice(1))
     setCurrentView(next.view)
     setCurrentViewProps(next.props)
     setTopbarTitleState(next.titleState || customTitleState(next.title || ''))
+    restoreMainScroll(next.scrollTop || 0)
   }
 
   return (

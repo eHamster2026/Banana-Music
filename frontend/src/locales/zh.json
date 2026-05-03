@@ -213,7 +213,11 @@
   "queue": {
     "title": "播放队列",
     "close": "关闭",
-    "empty": "队列为空"
+    "empty": "队列为空",
+    "playNextTooltip": "下一首播放",
+    "appendTooltip": "加入播放队列末尾",
+    "addedNext": "已添加到下一首",
+    "addedEnd": "已添加到播放队列"
   },
   "upload": {
     "queueTitle": "上传队列",
