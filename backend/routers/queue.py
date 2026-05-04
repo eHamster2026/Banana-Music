@@ -26,7 +26,7 @@ routers/queue.py
 import time
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 
 from deps import get_db, get_current_user
 import models, schemas
@@ -51,8 +51,92 @@ def _compact(items: list[models.PlayQueueItem]):
         item.order_idx = i
 
 
-def _serialize(queue: models.PlayQueue) -> dict:
+def _repair_cursor_after_removals(
+    queue: models.PlayQueue,
+    removed_order_idxs: set[int],
+    remaining_count: int,
+):
+    old_cursor = queue.cursor
+    if not removed_order_idxs:
+        return
+
+    removed_before = sum(1 for idx in removed_order_idxs if idx < old_cursor)
+    current_removed = old_cursor in removed_order_idxs
+    queue.cursor = old_cursor - removed_before
+
+    if remaining_count == 0:
+        queue.cursor = -1
+        queue.is_playing = False
+        queue.position_sec = 0.0
+        return
+
+    if queue.cursor >= remaining_count:
+        queue.cursor = remaining_count - 1
+        queue.is_playing = False
+        queue.position_sec = 0.0
+    elif current_removed:
+        queue.is_playing = False
+        queue.position_sec = 0.0
+
+
+def _drop_items_from_queue(
+    queue: models.PlayQueue,
+    removed_items: list[models.PlayQueueItem],
+    db: Session | None = None,
+) -> list[models.PlayQueueItem]:
+    if not removed_items:
+        return sorted(queue.items, key=lambda x: x.order_idx)
+
+    removed_ids = {item.id for item in removed_items}
+    removed_order_idxs = {item.order_idx for item in removed_items}
+    remaining = [
+        item
+        for item in sorted(queue.items, key=lambda x: x.order_idx)
+        if item.id not in removed_ids
+    ]
+
+    _compact(remaining)
+    _repair_cursor_after_removals(queue, removed_order_idxs, len(remaining))
+
+    session = db or object_session(queue)
+    if session is not None:
+        for item in removed_items:
+            session.delete(item)
+
+    return remaining
+
+
+def remove_track_from_queues(db: Session, track_id: int):
+    """删除曲目时同步移除所有播放队列中的引用。"""
+    items = (
+        db.query(models.PlayQueueItem)
+        .filter(models.PlayQueueItem.track_id == track_id)
+        .all()
+    )
+    by_queue: dict[int, tuple[models.PlayQueue, list[models.PlayQueueItem]]] = {}
+    for item in items:
+        queue_items = by_queue.setdefault(item.queue_id, (item.queue, []))[1]
+        queue_items.append(item)
+
+    for queue, removed_items in by_queue.values():
+        _drop_items_from_queue(queue, removed_items, db)
+
+
+def _live_items(queue: models.PlayQueue) -> list[models.PlayQueueItem]:
     items = sorted(queue.items, key=lambda x: x.order_idx)
+    stale = [item for item in items if item.track is None]
+    if not stale:
+        return items
+
+    session = object_session(queue)
+    live = _drop_items_from_queue(queue, stale, session)
+    if session is not None:
+        session.commit()
+    return live
+
+
+def _serialize(queue: models.PlayQueue) -> dict:
+    items = _live_items(queue)
     return {
         "cursor":        queue.cursor,
         "is_playing":    queue.is_playing,

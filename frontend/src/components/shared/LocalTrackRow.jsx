@@ -7,9 +7,6 @@ import { usePlayer } from '../../contexts/PlayerContext'
 import { useToast } from '../../contexts/ToastContext'
 import CoverArt from './CoverArt'
 
-// When `num` is provided the row shows an ordered track number as the first column.
-const GRID_ORDERED   = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px'
-
 function getTrackColor(track) {
   return track?.album?.art_color || track?.artist?.art_color || track?.art_color || 'art-1'
 }
@@ -41,8 +38,7 @@ export default function LocalTrackRow({ track, num, contextIdx, isPlaying, onPla
 
   return (
     <div
-      className={`local-track-row${isPlaying ? ' now-playing' : ''}`}
-      style={ordered ? { gridTemplateColumns: GRID_ORDERED } : undefined}
+      className={`local-track-row${ordered ? ' ordered' : ''}${isPlaying ? ' now-playing' : ''}`}
       onClick={onPlay}
     >
       {ordered && (

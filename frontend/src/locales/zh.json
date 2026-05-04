@@ -33,6 +33,14 @@
     "adminUsers": "用户管理",
     "adminPlugins": "插件管理"
   },
+  "mobileNav": {
+    "aria": "底部导航",
+    "home": "主页",
+    "library": "资料库",
+    "playlists": "播放列表",
+    "search": "搜索",
+    "admin": "管理"
+  },
   "login": {
     "title": "Banana Music",
     "subtitle": "登录以享受无限音乐",
@@ -370,6 +378,10 @@
     "pagePluginsTitle": "插件管理",
     "pageTracksSubtitle": "编辑元数据或删除曲目",
     "pageUsersSubtitle": "管理用户权限与账号",
-    "pagePluginsSubtitle": "管理示例插件、配置项与启停状态"
+    "pagePluginsSubtitle": "管理示例插件、配置项与启停状态",
+    "signInTitle": "登录 Banana Music",
+    "signInSubtitle": "登录后可进入管理页。管理员账号可以管理曲目、用户和插件。",
+    "accountSubtitle": "当前账号没有管理员权限。请使用管理员账号登录以访问管理功能。",
+    "logout": "退出登录"
   }
 }

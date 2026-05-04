@@ -3,6 +3,8 @@ import { useTranslation } from 'react-i18next'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { usePlayer } from '../contexts/PlayerContext'
+import { useModal } from '../contexts/ModalContext'
+import { useNav } from '../contexts/NavContext'
 import { apiFetch, fmtTime, formatTrackArtists, displayTrackTitle } from '../api.js'
 
 // ── 小工具 ────────────────────────────────────────────────────
@@ -895,7 +897,9 @@ function PluginsTab({ token }) {
 // ── 主视图 ────────────────────────────────────────────────────
 export default function AdminView({ tab = 'tracks' }) {
   const { t } = useTranslation()
-  const { token, currentUser } = useAuth()
+  const { token, currentUser, logout } = useAuth()
+  const { setShowLoginModal } = useModal()
+  const { navigate } = useNav()
 
   const titles = {
     tracks: t('admin.pageTracksTitle'),
@@ -907,12 +911,60 @@ export default function AdminView({ tab = 'tracks' }) {
     users: t('admin.pageUsersSubtitle'),
     plugins: t('admin.pagePluginsSubtitle'),
   }
+  const tabs = [
+    { key: 'tracks', view: 'admin-tracks', label: t('admin.pageTracksTitle') },
+    { key: 'users', view: 'admin-users', label: t('admin.pageUsersTitle') },
+    { key: 'plugins', view: 'admin-plugins', label: t('admin.pagePluginsTitle') },
+  ]
+
+  if (!token) {
+    return (
+      <div className="admin-page">
+        <div className="admin-auth-card">
+          <div className="empty-icon">⚙</div>
+          <h1>{t('admin.signInTitle')}</h1>
+          <p>{t('admin.signInSubtitle')}</p>
+          <button className="btn-primary" onClick={() => setShowLoginModal(true)}>
+            {t('login.login')}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (!currentUser?.is_admin) {
+    return (
+      <div className="admin-page">
+        <div className="admin-auth-card">
+          <div className="user-avatar art-1">{(currentUser?.username?.[0] || '?').toUpperCase()}</div>
+          <h1>{currentUser?.username || t('sidebar.notLoggedIn')}</h1>
+          <p>{t('admin.accountSubtitle')}</p>
+          <button className="btn-secondary" onClick={logout}>
+            {t('admin.logout')}
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div style={{ padding: '24px 28px 40px' }}>
+    <div className="admin-page">
       <div style={{ marginBottom: 24 }}>
         <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0, marginBottom: 4 }}>{titles[tab]}</h1>
         <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>{subtitles[tab]}</p>
+      </div>
+
+      <div className="admin-tabbar">
+        {tabs.map(item => (
+          <button
+            key={item.key}
+            type="button"
+            className={`admin-tab${tab === item.key ? ' active' : ''}`}
+            onClick={() => navigate(item.view, {}, item.label)}
+          >
+            {item.label}
+          </button>
+        ))}
       </div>
 
       {tab === 'tracks' && <TracksTab token={token} />}

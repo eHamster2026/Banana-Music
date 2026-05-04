@@ -33,6 +33,14 @@
     "adminUsers": "User admin",
     "adminPlugins": "Plugins"
   },
+  "mobileNav": {
+    "aria": "Bottom navigation",
+    "home": "Home",
+    "library": "Library",
+    "playlists": "Playlists",
+    "search": "Search",
+    "admin": "Admin"
+  },
   "login": {
     "title": "Banana Music",
     "subtitle": "Sign in for your library",
@@ -370,6 +378,10 @@
     "pagePluginsTitle": "Plugin management",
     "pageTracksSubtitle": "Edit metadata or delete tracks",
     "pageUsersSubtitle": "Manage user permissions and accounts",
-    "pagePluginsSubtitle": "Manage sample plugins, config and runtime status"
+    "pagePluginsSubtitle": "Manage sample plugins, config and runtime status",
+    "signInTitle": "Sign in to Banana Music",
+    "signInSubtitle": "Sign in to open the admin area. Admin accounts can manage tracks, users, and plugins.",
+    "accountSubtitle": "This account does not have admin access. Sign in with an admin account to manage the app.",
+    "logout": "Sign out"
   }
 }

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from deps import get_db, get_admin_user
 from auth_utils import get_password_hash
 import models, schemas
+from routers.queue import remove_track_from_queues
 from services.track_metadata_update import update_track_with_metadata_patch
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -178,6 +179,7 @@ def delete_track(
         models.PlaylistTrack.track_id == track_id).delete()
     db.query(models.PlayHistory).filter(
         models.PlayHistory.track_id == track_id).delete()
+    remove_track_from_queues(db, track_id)
     db.delete(track)
     db.commit()
 

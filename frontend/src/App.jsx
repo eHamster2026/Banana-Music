@@ -9,6 +9,7 @@ import { useAuth } from './contexts/AuthContext'
 import { useToast } from './contexts/ToastContext'
 import { uploadLocalAudioFiles } from './localUpload.js'
 import Sidebar from './components/Sidebar'
+import MobileBottomNav from './components/MobileBottomNav'
 import Topbar from './components/Topbar'
 import Player from './components/Player'
 import Toast from './components/Toast'
@@ -94,6 +95,7 @@ function AppInner() {
           <ContentRouter />
         </main>
       </div>
+      <MobileBottomNav />
       <Player />
       <Toast />
       <UploadQueueStatus />
