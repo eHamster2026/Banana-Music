@@ -41,13 +41,19 @@ import subprocess
 import sys
 import tempfile
 import urllib.parse
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
+from bulk_import_utils import (
+    LOSSLESS_EXTS,
+    SUPPORTED_EXTS,
+    MetadataResult,
+    _auth_headers,
+    resolve_upload_token,
+    upload_file_to_backend,
+)
 
-LOSSLESS_EXTS = frozenset({".ape", ".flac", ".wav", ".wma"})
-SUPPORTED_EXTS = frozenset({".flac", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".ape", ".wma"})
 PLAYLIST_EXTS = frozenset({".m3u", ".m3u8"})
 REMOTE_PLAYLIST_SCHEMES = frozenset({"http", "https"})
 
@@ -619,17 +625,6 @@ def convert_file(
 
     logging.info("[%s] 完成 -> %s", src.name, dst)
     return dst
-
-
-@dataclass
-class MetadataResult:
-    title: Optional[str] = None
-    artists: list = field(default_factory=list)
-    album: Optional[str] = None
-    album_artist: Optional[str] = None
-    album_artists: list = field(default_factory=list)
-    track_number: Optional[int] = None
-    confidence: float = 0.0
 
 
 _SYSTEM_PROMPT = """\
@@ -1290,14 +1285,6 @@ async def process_file(
     return result
 
 
-def _auth_headers(api_key: Optional[str], token: Optional[str]) -> dict[str, str]:
-    if token:
-        return {"Authorization": f"Bearer {token}"}
-    if api_key:
-        return {"x-api-key": api_key}
-    return {}
-
-
 def _read_flac_md5_for_dedup(path: Path) -> bytes | None:
     try:
         from mutagen.flac import FLAC
@@ -1507,114 +1494,6 @@ async def clean_tags_in_place(path: Path, *, ollama_url: str, model: str, timeou
     return llm, None
 
 
-async def _stage_file_to_backend(client, path: Path, base_url: str, poll_interval: float, job_timeout: float) -> dict:
-    logging.info("[%s] 上传文件并查重...", path.name)
-    with path.open("rb") as f:
-        r = await client.post(
-            f"{base_url}/rest/x-banana/tracks/upload-file",
-            files={"file": (path.name, f, "application/octet-stream")},
-        )
-    r.raise_for_status()
-    job_id = r.json()["job_id"]
-
-    deadline = asyncio.get_running_loop().time() + job_timeout
-    while True:
-        if asyncio.get_running_loop().time() >= deadline:
-            raise TimeoutError(f"上传任务超时: {job_id}")
-        await asyncio.sleep(poll_interval)
-        s = await client.get(f"{base_url}/rest/x-banana/tracks/upload-status/{job_id}")
-        s.raise_for_status()
-        state = s.json()
-        if state.get("state") in ("pending", "processing"):
-            continue
-        if state.get("state") == "error":
-            detail = state.get("detail") or "未知错误"
-            raise RuntimeError(f"上传任务失败: {detail}")
-        if state.get("state") != "done":
-            raise RuntimeError(f"未知上传状态: {state}")
-        return state
-
-
-async def upload_file_to_backend(
-    path: Path,
-    *,
-    base_url: str,
-    api_key: Optional[str],
-    token: Optional[str],
-    parse_metadata: bool,
-    metadata: Optional[MetadataResult] = None,
-    poll_interval: float,
-    job_timeout: float,
-    request_timeout: float,
-) -> dict:
-    try:
-        import httpx
-    except ImportError:
-        logging.error("请安装 httpx: pip install httpx")
-        return {"file": str(path), "status": "error", "detail": "missing httpx"}
-
-    base_url = base_url.rstrip("/")
-    headers = _auth_headers(api_key, token)
-
-    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
-        state = await _stage_file_to_backend(client, path, base_url, poll_interval, job_timeout)
-        if state.get("status") == "duplicate":
-            track_id = state.get("track_id")
-            logging.info("[%s] 内容重复，track_id=%s", path.name, track_id)
-            return {"file": str(path), "status": "duplicate", "track_id": track_id, "title": state.get("title")}
-
-        file_key = state.get("file_key")
-        if not file_key:
-            raise RuntimeError(f"上传完成但缺少 file_key: {state}")
-
-        payload = {"file_key": file_key, "parse_metadata": parse_metadata}
-        if metadata is not None:
-            payload["metadata"] = {
-                "title": metadata.title,
-                "artists": metadata.artists,
-                "album": metadata.album,
-                "album_artist": metadata.album_artist,
-                "album_artists": metadata.album_artists,
-                "track_number": metadata.track_number,
-            }
-
-        logging.info("[%s] 写入曲库...", path.name)
-        created = await client.post(
-            f"{base_url}/rest/x-banana/tracks/create",
-            json=payload,
-        )
-        created.raise_for_status()
-        data = created.json()
-        logging.info("[%s] 完成，status=%s track_id=%s", path.name, data.get("status"), data.get("track_id"))
-        return {"file": str(path), **data}
-
-
-async def login_to_backend(
-    *,
-    base_url: str,
-    username: str,
-    password: str,
-    request_timeout: float,
-) -> str:
-    try:
-        import httpx
-    except ImportError:
-        raise RuntimeError("请安装 httpx: pip install httpx")
-
-    base_url = base_url.rstrip("/")
-    async with httpx.AsyncClient(timeout=request_timeout) as client:
-        r = await client.post(
-            f"{base_url}/rest/x-banana/auth/login",
-            json={"username": username, "password": password},
-        )
-        r.raise_for_status()
-        body = r.json()
-    token = body.get("access_token")
-    if not token:
-        raise RuntimeError(f"登录成功但响应缺少 access_token: {body}")
-    return str(token)
-
-
 def _next_playlist_name(base_name: str, existing_casefold_names: set[str]) -> str:
     index = 2
     while True:
@@ -1693,22 +1572,6 @@ async def add_track_to_playlist(client, *, base_url: str, playlist_id: int, trac
         json={"track_id": track_id},
     )
     r.raise_for_status()
-
-
-async def resolve_upload_token(args: argparse.Namespace) -> Optional[str]:
-    if args.token:
-        return args.token
-    if args.username or args.password:
-        if not args.username or not args.password:
-            raise RuntimeError("--username 与 --password 必须同时提供")
-        logging.info("使用用户名/密码登录: %s", args.username)
-        return await login_to_backend(
-            base_url=args.base_url,
-            username=args.username,
-            password=args.password,
-            request_timeout=args.request_timeout,
-        )
-    return None
 
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:

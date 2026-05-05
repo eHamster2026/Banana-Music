@@ -14,21 +14,20 @@ import argparse
 import asyncio
 import base64
 import logging
-import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from bulk_import import (
+from bulk_import_utils import (
     MetadataResult,
-    SUPPORTED_EXTS,
     _auth_headers,
-    _prepare_upload_copy,
+    add_auth_options,
+    iter_audio_files,
     resolve_upload_token,
     upload_file_to_backend,
 )
-from upload_audio_dir import add_auth_options, iter_audio_files
 
 
 IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
@@ -82,6 +81,16 @@ def detect_cover_ext(data: bytes, fallback: str = ".jpg") -> str:
     if data.startswith(b"\xff\xd8\xff"):
         return ".jpg"
     return suffix if suffix in IMAGE_EXTS else ".jpg"
+
+
+def copy_to_tmp(src: Path, tmp_dir: Path) -> Path:
+    dst = tmp_dir / src.name
+    counter = 1
+    while dst.exists():
+        dst = tmp_dir / f"{src.stem}.{counter}{src.suffix}"
+        counter += 1
+    shutil.copy2(src, dst)
+    return dst
 
 
 async def fetch_existing_albums(base_url: str, headers: dict[str, str], request_timeout: float) -> list[dict]:
@@ -230,10 +239,7 @@ async def run(args: argparse.Namespace) -> None:
         for index, source in enumerate(paths, start=1):
             logging.info("[%d/%d] 上传专辑曲目: %s", index, len(paths), source.name)
             try:
-                upload_path = _prepare_upload_copy(source, tmp_dir)
-                if upload_path is None:
-                    results.append({"file": str(source), "status": "skipped", "detail": "预处理失败"})
-                    continue
+                upload_path = copy_to_tmp(source, tmp_dir)
                 if cover_data and cover_ext:
                     embed_cover(upload_path, cover_data, cover_ext)
 

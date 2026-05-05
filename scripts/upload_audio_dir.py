@@ -10,33 +10,49 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import os
 import sys
 from pathlib import Path
 
-from bulk_import import (
-    SUPPORTED_EXTS,
+from bulk_import_utils import (
     _auth_headers,
+    add_auth_options,
+    iter_audio_files,
     resolve_upload_token,
-    upload_file_to_backend,
+    upload_file_with_client,
 )
 
 
-def iter_audio_files(root: Path, *, recursive: bool) -> list[Path]:
-    pattern = "**/*" if recursive else "*"
-    return sorted(
-        path
-        for path in root.glob(pattern)
-        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTS
-    )
-
-
-def add_auth_options(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--base-url", default=os.getenv("BANANA_BASE_URL", "http://localhost:8000"), help="Banana Music 后端地址")
-    parser.add_argument("--api-key", default=os.getenv("BANANA_API_KEY"), help="API Key（可用 BANANA_API_KEY）")
-    parser.add_argument("--token", default=os.getenv("BANANA_TOKEN"), help="Bearer token（可用 BANANA_TOKEN；优先于 API Key）")
-    parser.add_argument("--username", default=os.getenv("BANANA_USERNAME"), help="登录用户名（可用 BANANA_USERNAME）")
-    parser.add_argument("--password", default=os.getenv("BANANA_PASSWORD"), help="登录密码（可用 BANANA_PASSWORD）")
+async def upload_worker(
+    *,
+    worker_id: int,
+    queue: asyncio.Queue[tuple[int, Path] | None],
+    results: list[dict | None],
+    total: int,
+    client,
+    args: argparse.Namespace,
+) -> None:
+    while True:
+        item = await queue.get()
+        try:
+            if item is None:
+                return
+            index, path = item
+            logging.info("[worker-%02d %d/%d] 上传: %s", worker_id, index, total, path)
+            try:
+                results[index - 1] = await upload_file_with_client(
+                    client,
+                    path,
+                    base_url=args.base_url,
+                    parse_metadata=False,
+                    metadata=None,
+                    poll_interval=args.poll_interval,
+                    job_timeout=args.job_timeout,
+                )
+            except Exception as exc:
+                logging.error("[%s] 上传失败: %s", path, exc, exc_info=args.verbose)
+                results[index - 1] = {"file": str(path), "status": "error", "detail": str(exc)}
+        finally:
+            queue.task_done()
 
 
 async def run(args: argparse.Namespace) -> None:
@@ -55,28 +71,51 @@ async def run(args: argparse.Namespace) -> None:
     if not headers:
         logging.warning("未提供认证信息；如后端要求登录，上传会返回 401")
 
-    results: list[dict] = []
-    for index, path in enumerate(paths, start=1):
-        logging.info("[%d/%d] 上传: %s", index, len(paths), path)
-        try:
-            results.append(await upload_file_to_backend(
-                path,
-                base_url=args.base_url,
-                api_key=args.api_key,
-                token=token,
-                parse_metadata=False,
-                metadata=None,
-                poll_interval=args.poll_interval,
-                job_timeout=args.job_timeout,
-                request_timeout=args.request_timeout,
-            ))
-        except Exception as exc:
-            logging.error("[%s] 上传失败: %s", path, exc, exc_info=args.verbose)
-            results.append({"file": str(path), "status": "error", "detail": str(exc)})
+    try:
+        import httpx
+    except ImportError:
+        logging.error("请安装 httpx: pip install httpx")
+        sys.exit(1)
 
-    added = sum(1 for item in results if item.get("status") == "added")
-    duplicate = sum(1 for item in results if item.get("status") == "duplicate")
-    failed = sum(1 for item in results if item.get("status") == "error")
+    concurrency = max(1, args.concurrency)
+    max_connections = args.max_connections or max(concurrency * 2, concurrency)
+    logging.info(
+        "压测上传启动：files=%d concurrency=%d max_connections=%d poll_interval=%.2fs",
+        len(paths),
+        concurrency,
+        max_connections,
+        args.poll_interval,
+    )
+
+    queue: asyncio.Queue[tuple[int, Path] | None] = asyncio.Queue()
+    results: list[dict | None] = [None] * len(paths)
+    for item in enumerate(paths, start=1):
+        queue.put_nowait(item)
+    for _ in range(concurrency):
+        queue.put_nowait(None)
+
+    limits = httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_connections)
+    timeout = httpx.Timeout(args.request_timeout)
+    async with httpx.AsyncClient(timeout=timeout, headers=headers, limits=limits) as client:
+        workers = [
+            asyncio.create_task(upload_worker(
+                worker_id=index,
+                queue=queue,
+                results=results,
+                total=len(paths),
+                client=client,
+                args=args,
+            ))
+            for index in range(1, concurrency + 1)
+        ]
+        await queue.join()
+        await asyncio.gather(*workers)
+
+    compact_results = [item or {"status": "error", "detail": "missing worker result"} for item in results]
+
+    added = sum(1 for item in compact_results if item.get("status") == "added")
+    duplicate = sum(1 for item in compact_results if item.get("status") == "duplicate")
+    failed = sum(1 for item in compact_results if item.get("status") == "error")
     logging.info("完成：新增 %d  重复 %d  失败 %d", added, duplicate, failed)
 
 
@@ -84,7 +123,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="直接上传目录下所有音频文件，不做本地或服务端元数据清洗")
     parser.add_argument("directory", type=Path, help="音频目录")
     parser.add_argument("--no-recursive", action="store_true", help="只读取目录第一层")
-    parser.add_argument("--poll-interval", default=0.8, type=float, help="上传任务轮询间隔秒数")
+    parser.add_argument("--concurrency", default=64, type=int, help="并发上传 worker 数（默认 64，用于压测）")
+    parser.add_argument("--max-connections", default=0, type=int, help="HTTP 连接池上限；0 表示自动按并发数放大")
+    parser.add_argument("--poll-interval", default=0.2, type=float, help="上传任务轮询间隔秒数")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数")
     parser.add_argument("--request-timeout", default=120.0, type=float, help="HTTP 请求超时秒数")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细日志")
