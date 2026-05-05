@@ -140,8 +140,20 @@ export default function Topbar() {
                     className="search-drop-art"
                     alt={t('topbar.coverAlt', { title: displayTrackTitle(tr) })}
                   />
-                  <div>
-                    <div className="search-drop-name">{displayTrackTitle(tr)}</div>
+                  <div className="search-drop-copy">
+                    <div className="search-drop-title-line">
+                      <div className="search-drop-name">{displayTrackTitle(tr)}</div>
+                      {tr.is_liked && (
+                        <svg
+                          className="search-drop-liked"
+                          viewBox="0 0 16 16"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <path d="M8 13.5a.75.75 0 01-.53-.22l-5.47-5.47a3.75 3.75 0 015.3-5.3L8 3.19l.7-.7a3.75 3.75 0 115.3 5.3L8.53 13.28A.75.75 0 018 13.5z"/>
+                        </svg>
+                      )}
+                    </div>
                     <div className="search-drop-meta">{formatTrackArtists(tr)}</div>
                   </div>
                 </div>

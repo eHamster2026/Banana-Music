@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from deps import get_db, get_optional_user
 from services.artist_names import UNKNOWN_ARTIST_NAMES
+from services.track_likes import mark_track_likes
 import models, schemas
 import random
 
@@ -38,6 +39,7 @@ def home(db: Session = Depends(get_db), user=Depends(get_optional_user)):
     local_tracks = db.query(models.Track)\
         .filter(models.Track.stream_url.like('/resource/%'))\
         .all()
+    mark_track_likes(db, local_tracks, user)
 
     return schemas.HomeResponse(
         banners=banners,

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session, object_session
 
 from deps import get_db, get_current_user
 import models, schemas
+from services.track_likes import mark_track_likes
 
 router = APIRouter(prefix="/queue", tags=["Queue"])
 
@@ -137,6 +138,9 @@ def _live_items(queue: models.PlayQueue) -> list[models.PlayQueueItem]:
 
 def _serialize(queue: models.PlayQueue) -> dict:
     items = _live_items(queue)
+    session = object_session(queue)
+    if session is not None:
+        mark_track_likes(session, [item.track for item in items if item.track is not None], queue.user)
     return {
         "cursor":        queue.cursor,
         "is_playing":    queue.is_playing,
@@ -155,6 +159,8 @@ def _serialize(queue: models.PlayQueue) -> dict:
                     "duration_sec": it.track.duration_sec,
                     "track_number": it.track.track_number,
                     "stream_url":   it.track.stream_url,
+                    "cover_url":    it.track.cover_url,
+                    "is_liked":     bool(getattr(it.track, "is_liked", False)),
                     "artist": {
                         "id":   it.track.artist.id,
                         "name": it.track.artist.name,

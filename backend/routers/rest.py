@@ -22,6 +22,7 @@ from routers import (
 from plugins.errors import PluginParseError, PluginUpstreamError
 from services.artist_names import UNKNOWN_ARTIST_NAMES
 from services.plugin_search import run_plugin_search_flat
+from services.track_likes import mark_track_like, mark_track_likes
 from services.track_load_options import track_out_load_options
 
 
@@ -86,34 +87,6 @@ def _cover_file_from_path(cover_path: str | None) -> Path | None:
     return Path(__file__).parent.parent.parent / "data" / "covers" / cover_path
 
 
-def _mark_track_likes(
-    db: Session,
-    tracks: list[models.Track],
-    user: Optional[models.User],
-) -> list[models.Track]:
-    if not tracks:
-        return tracks
-
-    liked_ids: set[int] = set()
-    if user is not None:
-        track_ids = [track.id for track in tracks]
-        liked_ids = {
-            row[0]
-            for row in (
-                db.query(models.UserTrackLike.track_id)
-                .filter(
-                    models.UserTrackLike.user_id == user.id,
-                    models.UserTrackLike.track_id.in_(track_ids),
-                )
-                .all()
-            )
-        }
-
-    for track in tracks:
-        track.is_liked = track.id in liked_ids
-    return tracks
-
-
 # ── System-ish endpoints ────────────────────────────────────────
 
 
@@ -147,7 +120,7 @@ def get_songs(
     else:
         q = q.order_by(models.Track.id.desc())
     tracks = q.offset(skip).limit(limit).all()
-    return _mark_track_likes(db, tracks, user)
+    return mark_track_likes(db, tracks, user)
 
 
 @router.get("/getSongCount")
@@ -159,11 +132,15 @@ def get_song_count(local: bool = Query(False), db: Session = Depends(get_db)):
 
 
 @router.get("/getSong", response_model=schemas.TrackDetail)
-def get_song(id: int = Query(...), db: Session = Depends(get_db)):
+def get_song(
+    id: int = Query(...),
+    db: Session = Depends(get_db),
+    user: Optional[models.User] = Depends(get_optional_user),
+):
     track = db.query(models.Track).filter(models.Track.id == id).first()
     if not track:
         raise HTTPException(404, "歌曲不存在")
-    return track
+    return mark_track_like(db, track, user)
 
 
 @router.get("/getStreamInfo")
@@ -263,7 +240,11 @@ def get_album_count(db: Session = Depends(get_db)):
 
 
 @router.get("/getAlbum", response_model=schemas.AlbumDetail)
-def get_album(id: int = Query(...), db: Session = Depends(get_db)):
+def get_album(
+    id: int = Query(...),
+    db: Session = Depends(get_db),
+    user: Optional[models.User] = Depends(get_optional_user),
+):
     album = (
         db.query(models.Album)
         .options(selectinload(models.Album.tracks))
@@ -272,6 +253,7 @@ def get_album(id: int = Query(...), db: Session = Depends(get_db)):
     )
     if not album:
         raise HTTPException(404, "专辑不存在")
+    mark_track_likes(db, list(album.tracks), user)
     return album
 
 
@@ -322,8 +304,9 @@ def get_artist_songs(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
+    user: Optional[models.User] = Depends(get_optional_user),
 ):
-    return (
+    tracks = (
         db.query(models.Track)
         .options(*track_out_load_options())
         .outerjoin(models.TrackArtist, models.TrackArtist.track_id == models.Track.id)
@@ -334,6 +317,7 @@ def get_artist_songs(
         .limit(limit)
         .all()
     )
+    return mark_track_likes(db, tracks, user)
 
 
 # ── Search ──────────────────────────────────────────────────────
@@ -387,7 +371,7 @@ async def search3(
             plugin_hits = []
 
     return schemas.SearchResult(
-        tracks=tracks,
+        tracks=mark_track_likes(db, tracks, user),
         albums=albums,
         artists=artists,
         playlists=[_playlist_out(p) for p in playlists],
@@ -500,6 +484,7 @@ def get_starred2(
     user: models.User = Depends(get_current_user),
 ):
     tracks = _starred_tracks(db, user.id)
+    mark_track_likes(db, tracks, user)
     if not includeMeta:
         return [schemas.TrackOut.model_validate(track) for track in tracks]
     return {
@@ -581,10 +566,15 @@ def get_playlists(
 
 
 @router.get("/getPlaylist", response_model=schemas.PlaylistDetail)
-def get_playlist(id: int = Query(...), db: Session = Depends(get_db)):
+def get_playlist(
+    id: int = Query(...),
+    db: Session = Depends(get_db),
+    user: Optional[models.User] = Depends(get_optional_user),
+):
     playlist = db.query(models.Playlist).filter(models.Playlist.id == id).first()
     if not playlist:
         raise HTTPException(404, "歌单不存在")
+    mark_track_likes(db, [pt.track for pt in playlist.playlist_tracks], user)
     return _playlist_detail(playlist)
 
 

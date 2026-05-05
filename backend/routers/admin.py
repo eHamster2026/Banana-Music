@@ -13,6 +13,7 @@ from deps import get_db, get_admin_user
 from auth_utils import get_password_hash
 import models, schemas
 from routers.queue import remove_track_from_queues
+from services.track_likes import mark_track_likes
 from services.track_load_options import track_out_load_options
 from services.track_metadata_update import update_track_with_metadata_patch
 
@@ -55,7 +56,7 @@ def list_tracks(
     q: Optional[str] = Query(None),
     missing_metadata: bool = Query(False, description="仅返回元数据不完整的曲目"),
     db: Session = Depends(get_db),
-    _admin: models.User = Depends(get_admin_user),
+    admin: models.User = Depends(get_admin_user),
 ):
     query = db.query(models.Track).options(*track_out_load_options())
     if q:
@@ -68,6 +69,7 @@ def list_tracks(
                  ))
     total = query.count()
     items = query.order_by(models.Track.id.desc()).offset(skip).limit(limit).all()
+    mark_track_likes(db, items, admin)
     return {"total": total, "items": items}
 
 
