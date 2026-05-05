@@ -38,8 +38,19 @@ async def upload_worker(
             if item is None:
                 return
             index, path = item
-            logging.info("[worker-%02d %d/%d] 上传: %s", worker_id, index, total, path)
+            logging.info("[worker-%02d %d/%d] 检查标签: %s", worker_id, index, total, path)
             try:
+                has_required_tags = await asyncio.to_thread(
+                    has_title_and_artist_tags,
+                    path,
+                    timeout=args.metadata_check_timeout,
+                )
+                if not has_required_tags:
+                    logging.warning("[%s] title 或 artist 为空，跳过", path)
+                    results[index - 1] = {"file": str(path), "status": "skipped", "detail": "title_or_artist_missing"}
+                    continue
+
+                logging.info("[worker-%02d %d/%d] 上传: %s", worker_id, index, total, path)
                 results[index - 1] = await upload_file_with_client(
                     client,
                     path,
@@ -66,18 +77,6 @@ async def run(args: argparse.Namespace) -> None:
     if not paths:
         logging.error("目录下没有支持的音频文件: %s", root)
         sys.exit(1)
-    upload_paths: list[Path] = []
-    skipped_metadata = 0
-    for path in paths:
-        if has_title_and_artist_tags(path):
-            upload_paths.append(path)
-        else:
-            skipped_metadata += 1
-            logging.warning("[%s] title 或 artist 为空，跳过", path)
-    if not upload_paths:
-        logging.error("没有 title 和 artist 都完整的音频文件: %s", root)
-        sys.exit(1)
-    paths = upload_paths
 
     token = await resolve_upload_token(args)
     headers = _auth_headers(args.api_key, token)
@@ -93,12 +92,12 @@ async def run(args: argparse.Namespace) -> None:
     concurrency = max(1, args.concurrency)
     max_connections = args.max_connections or max(concurrency * 2, concurrency)
     logging.info(
-        "压测上传启动：files=%d skipped_metadata=%d concurrency=%d max_connections=%d poll_interval=%.2fs",
+        "压测上传启动：files=%d concurrency=%d max_connections=%d poll_interval=%.2fs metadata_check_timeout=%.1fs",
         len(paths),
-        skipped_metadata,
         concurrency,
         max_connections,
         args.poll_interval,
+        args.metadata_check_timeout,
     )
 
     queue: asyncio.Queue[tuple[int, Path] | None] = asyncio.Queue()
@@ -129,8 +128,9 @@ async def run(args: argparse.Namespace) -> None:
 
     added = sum(1 for item in compact_results if item.get("status") == "added")
     duplicate = sum(1 for item in compact_results if item.get("status") == "duplicate")
+    skipped = sum(1 for item in compact_results if item.get("status") == "skipped")
     failed = sum(1 for item in compact_results if item.get("status") == "error")
-    logging.info("完成：新增 %d  重复 %d  跳过元数据不完整 %d  失败 %d", added, duplicate, skipped_metadata, failed)
+    logging.info("完成：新增 %d  重复 %d  跳过 %d  失败 %d", added, duplicate, skipped, failed)
 
 
 def main() -> None:
@@ -139,6 +139,7 @@ def main() -> None:
     parser.add_argument("--no-recursive", action="store_true", help="只读取目录第一层")
     parser.add_argument("--concurrency", default=64, type=int, help="并发上传 worker 数（默认 64，用于压测）")
     parser.add_argument("--max-connections", default=0, type=int, help="HTTP 连接池上限；0 表示自动按并发数放大")
+    parser.add_argument("--metadata-check-timeout", default=5.0, type=float, help="单文件 title/artist 标签检查超时秒数")
     parser.add_argument("--poll-interval", default=0.2, type=float, help="上传任务轮询间隔秒数")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数")
     parser.add_argument("--request-timeout", default=120.0, type=float, help="HTTP 请求超时秒数")

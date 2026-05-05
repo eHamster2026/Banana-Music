@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -58,11 +60,74 @@ def _tag_values(audio, key: str) -> list[str]:
     return [text] if text else []
 
 
-def has_title_and_artist_tags(path: Path) -> bool:
+def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format_tags=title,artist:stream_tags=title,artist",
+                "-of",
+                "json",
+                str(path),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    except subprocess.TimeoutExpired:
+        logging.warning("[%s] 标签检查超时 %.1fs，跳过", path.name, timeout)
+        return False
+    except Exception as exc:
+        logging.warning("[%s] ffprobe 标签检查失败，跳过: %s", path.name, exc)
+        return False
+
+    if result.returncode != 0:
+        logging.warning("[%s] ffprobe 无法读取标签，跳过: %s", path.name, (result.stderr or "").strip())
+        return False
+
+    try:
+        data = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError:
+        logging.warning("[%s] ffprobe 标签输出不是 JSON，跳过", path.name)
+        return False
+
+    tag_sets = []
+    format_tags = data.get("format", {}).get("tags")
+    if isinstance(format_tags, dict):
+        tag_sets.append(format_tags)
+    streams = data.get("streams")
+    if isinstance(streams, list):
+        for stream in streams:
+            tags = stream.get("tags") if isinstance(stream, dict) else None
+            if isinstance(tags, dict):
+                tag_sets.append(tags)
+
+    def has_key(name: str) -> bool:
+        name = name.casefold()
+        for tags in tag_sets:
+            for key, value in tags.items():
+                if str(key).casefold() == name and str(value).strip():
+                    return True
+        return False
+
+    return has_key("title") and has_key("artist")
+
+
+def has_title_and_artist_tags(path: Path, *, timeout: float = 5.0) -> bool:
+    ffprobe_result = _has_title_and_artist_via_ffprobe(path, timeout)
+    if ffprobe_result is not None:
+        return ffprobe_result
+
     try:
         from mutagen import File as MutagenFile
     except ImportError:
-        logging.error("请安装 mutagen: pip install mutagen")
+        logging.error("请安装 ffprobe 或 mutagen 后再检查本地标签")
         return False
 
     try:
