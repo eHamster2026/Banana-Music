@@ -4,6 +4,7 @@ import { useNav } from '../contexts/NavContext'
 import { apiFetch } from '../api.js'
 import AlbumCard from '../components/shared/AlbumCard'
 import useMainScrollPager from '../hooks/useMainScrollPager'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 const PAGE_SIZE = 100
 
@@ -31,19 +32,21 @@ export default function AlbumLibraryView() {
     }
   }, [])
 
-  const loadPage = useCallback(async ({ initial = false } = {}) => {
-    if (loadingRef.current || !hasMoreRef.current) return
+  const loadPage = useCallback(async ({ initial = false, replace = false } = {}) => {
+    if (loadingRef.current || (!replace && !hasMoreRef.current)) return
     loadingRef.current = true
     if (initial) setLoading(true)
-    else setLoadingMore(true)
+    else if (!replace) setLoadingMore(true)
 
+    const skip = replace ? 0 : skipRef.current
     try {
-      if (initial) {
+      if (initial || replace) {
         await loadTotal()
       }
-      const data = await apiFetch(`/rest/getAlbumList2?skip=${skipRef.current}&limit=${PAGE_SIZE}`)
+      const data = await apiFetch(`/rest/getAlbumList2?skip=${skip}&limit=${PAGE_SIZE}`)
       const page = Array.isArray(data) ? data : []
       setAlbums(prev => {
+        if (replace) return page
         const seen = new Set(prev.map(a => a.id))
         const next = [...prev]
         for (const album of page) {
@@ -54,7 +57,7 @@ export default function AlbumLibraryView() {
         }
         return next
       })
-      skipRef.current += page.length
+      skipRef.current = skip + page.length
       const more = page.length === PAGE_SIZE
       hasMoreRef.current = more
       setHasMore(more)
@@ -72,6 +75,13 @@ export default function AlbumLibraryView() {
     loadPage({ initial: true })
   }, [loadPage])
 
+  const silentRefresh = useCallback(() => {
+    hasMoreRef.current = true
+    setHasMore(true)
+    loadPage({ replace: true })
+  }, [loadPage])
+
+  usePageRefresh(silentRefresh)
   useMainScrollPager({ hasMore, onLoadMore: loadPage })
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /></div>

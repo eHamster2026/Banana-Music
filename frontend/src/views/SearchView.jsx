@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
@@ -9,6 +9,7 @@ import TrackRow from '../components/shared/TrackRow'
 import AlbumCard from '../components/shared/AlbumCard'
 import ArtistCard from '../components/shared/ArtistCard'
 import PlaylistCard from '../components/shared/PlaylistCard'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function SearchView({ query }) {
   const { t } = useTranslation()
@@ -20,10 +21,9 @@ export default function SearchView({ query }) {
   const [loading, setLoading] = useState(false)
   const [pluginDl, setPluginDl] = useState({})
 
-  useEffect(() => {
-    setTopbarTitle(query?.trim() ? t('topbar.searchPrefix') + query : t('search.pageTitle'))
+  const loadSearch = useCallback(({ initial = false } = {}) => {
     if (!query?.trim()) { setResults(null); return }
-    setLoading(true)
+    if (initial) setLoading(true)
     apiFetch('/rest/search3?query=' + encodeURIComponent(query), {}, token)
       .then(data => {
         setResults(data)
@@ -31,7 +31,14 @@ export default function SearchView({ query }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [query, token, t, setTopbarTitle])
+  }, [query, token, setContextQueue])
+
+  useEffect(() => {
+    setTopbarTitle(query?.trim() ? t('topbar.searchPrefix') + query : t('search.pageTitle'))
+    loadSearch({ initial: true })
+  }, [query, t, setTopbarTitle, loadSearch])
+
+  usePageRefresh(loadSearch, { enabled: Boolean(query?.trim()) })
 
   async function toggleLike(track) {
     if (!token) { showToast(t('search.loginFirst')); return }

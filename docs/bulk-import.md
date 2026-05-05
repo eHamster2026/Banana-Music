@@ -21,7 +21,7 @@
 | `python scripts/bulk_import.py convert` | 无损音频转 FLAC，保留完整元数据 | 单独进行格式标准化 |
 | `python scripts/bulk_import.py clean` | 通过 Ollama LLM 清洗文件名/标签 | 单独进行元数据修复 |
 | `python scripts/bulk_import.py process` | 上述两步的流水线（转码 → LLM 清洗） | 批量导入前的完整预处理 |
-| `python scripts/bulk_import.py upload` | 按后端上传协议直接上传音频文件 | 处理后或已有目录的批量上传 |
+| `python scripts/bulk_import.py upload` | 按后端上传协议直接上传音频文件，或导入 `.m3u/.m3u8` 播放列表 | 处理后目录批量上传；从播放列表创建歌单 |
 
 该脚本不依赖 Banana Music 服务进程，可在服务器启动前或离线环境中使用。
 
@@ -146,6 +146,10 @@ POST /rest/x-banana/tracks/upload-file
 
 `upload` 会在本地先计算与服务端一致的 `audio_hash`，调用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=...` 查询是否重复；命中时返回已有 `track_id/title` 并跳过上传。未命中时才执行 Ollama 清洗，清洗成功后上传并创建曲目。这样重复文件不会消耗 LLM 推理。脚本本地清洗成功时会自动关闭本次服务端 `parse_upload`，避免同一首歌重复调用 Ollama。
 
+默认遇到重复内容时不会修改服务器已有曲目。若明确传 `--overwrite-duplicates`，脚本会在查重命中后**不重新上传音频**，而是用本地 LLM 清洗结果（失败时退回文件内嵌标签）调用管理员接口覆盖已有曲目的标题、主艺人、专辑和音轨号。该参数需要管理员账号或管理员 API Key。
+
+`upload` 也支持 `.m3u` / `.m3u8` 播放列表文件：脚本会解析其中的本地音频路径（支持相对路径、绝对路径和 `file://` URI）以及 `http/https` 远程音频 URL。远程音频会先下载到临时目录，再逐首执行上传/查重，并创建 Banana Music 歌单，按 M3U 顺序添加曲目。若同名歌单已存在，只有空歌单会被复用；非空同名歌单会保留不动，脚本自动创建带编号的新歌单。缺失文件会记录 warning 并跳过。
+
 ```bash
 # 使用环境变量
 BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload ./processed/*.flac
@@ -156,6 +160,10 @@ python scripts/bulk_import.py upload ./processed/*.flac \
   --api-key am_xxx \
   --job-timeout 180 \
   --no-parse-metadata
+
+# 导入 m3u8，上传引用歌曲并创建同名歌单
+BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload ./playlists/favorites.m3u8 \
+  --base-url http://localhost:8000
 ```
 
 认证参数支持：
@@ -229,6 +237,7 @@ scripts/bulk_import.py upload --no-parse-metadata
 |------|--------------|------|
 | `--parse-metadata` | `parse_metadata: true` | 入库后继续入队服务端 `parse_upload` 清洗；仅在脚本跳过本地 LLM 时生效。 |
 | `--no-parse-metadata` | `parse_metadata: false` | 不入队服务端 `parse_upload`。脚本本地 LLM 成功时会自动使用该行为。 |
+| `--overwrite-duplicates` | 不上传重复音频；额外调用管理员更新接口 | 内容重复时，用本地元数据覆盖服务器已有曲目的标题、主艺人、专辑和音轨号；默认关闭。 |
 
 推荐批量导入命令：
 

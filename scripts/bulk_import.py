@@ -7,7 +7,7 @@ Subcommands:
   convert  Convert lossless audio to FLAC while preserving tags.
   clean    Use Ollama to parse/clean metadata and print JSON.
   process  Convert when needed, clean metadata, and write tags to a copy.
-  upload   Upload audio files to a running Banana Music backend.
+  upload   Upload audio files or M3U/M3U8 playlists to a running Banana Music backend.
 
 Examples:
   python scripts/bulk_import.py convert *.ape --output-dir ./flac/ --level 8
@@ -18,6 +18,7 @@ Examples:
   python scripts/bulk_import.py process *.ape *.mp3 --upload --username alice --password secret
   python scripts/bulk_import.py upload ./processed/*.flac --api-key am_xxx
   python scripts/bulk_import.py upload ./processed/*.flac --username alice --password secret
+  python scripts/bulk_import.py upload ./playlists/favorites.m3u8 --api-key am_xxx
 
 Python deps:
   pip install -r scripts/requirements-bulk-import.txt
@@ -39,6 +40,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import urllib.parse
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -46,6 +48,15 @@ from typing import Optional
 
 LOSSLESS_EXTS = frozenset({".ape", ".flac", ".wav", ".wma"})
 SUPPORTED_EXTS = frozenset({".flac", ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".ape", ".wma"})
+PLAYLIST_EXTS = frozenset({".m3u", ".m3u8"})
+REMOTE_PLAYLIST_SCHEMES = frozenset({"http", "https"})
+
+
+@dataclass
+class PlaylistEntry:
+    source: str
+    path: Optional[Path] = None
+    url: Optional[str] = None
 
 
 def _log_unhandled_exception(context: str, exc: BaseException) -> None:
@@ -101,11 +112,80 @@ def _expand_paths(patterns: list[str], supported_exts: frozenset[str] | None = N
     return paths
 
 
+def _read_playlist_text(path: Path) -> str:
+    return path.read_text()
+
+
+def _entry_from_playlist_uri(raw: str, playlist_dir: Path) -> PlaylistEntry | None:
+    item = raw.strip().strip("\ufeff")
+    if not item or item.startswith("#"):
+        return None
+
+    if re.match(r"^[A-Za-z]:[\\/]", item):
+        p = Path(item.replace("\\", os.sep))
+        return PlaylistEntry(source=item, path=p if p.is_absolute() else playlist_dir / p)
+
+    parsed = urllib.parse.urlparse(item)
+    scheme = parsed.scheme.lower()
+    if scheme in REMOTE_PLAYLIST_SCHEMES:
+        return PlaylistEntry(source=item, url=item)
+    if parsed.scheme and scheme != "file":
+        logging.warning("跳过不支持的播放列表 URI: %s", item)
+        return None
+
+    if scheme == "file":
+        item = urllib.parse.unquote(parsed.path)
+    else:
+        item = urllib.parse.unquote(item)
+
+    item = item.replace("\\", os.sep)
+    p = Path(item)
+    if not p.is_absolute():
+        p = playlist_dir / p
+    return PlaylistEntry(source=raw.strip(), path=p)
+
+
+def parse_m3u_playlist(path: Path) -> tuple[str, list[PlaylistEntry]]:
+    playlist_dir = path.parent
+    tracks: list[PlaylistEntry] = []
+    missing: list[Path] = []
+    seen_missing: set[str] = set()
+
+    for line in _read_playlist_text(path).splitlines():
+        entry = _entry_from_playlist_uri(line, playlist_dir)
+        if entry is None:
+            continue
+        if entry.url:
+            tracks.append(entry)
+            continue
+        candidate = entry.path
+        if candidate is None:
+            continue
+        if candidate.suffix.lower() not in SUPPORTED_EXTS:
+            logging.warning("[%s] 跳过不支持的播放列表条目: %s", path.name, candidate)
+            continue
+        if not candidate.exists():
+            key = str(candidate)
+            if key not in seen_missing:
+                missing.append(candidate)
+                seen_missing.add(key)
+            continue
+        tracks.append(entry)
+
+    for p in missing:
+        logging.warning("[%s] 引用文件不存在，跳过: %s", path.name, p)
+    if not tracks:
+        logging.warning("[%s] 未解析到可导入音频", path.name)
+    return path.stem, tracks
+
+
 def _first_easy(easy, key: str) -> Optional[str]:
     if easy is None:
         return None
     val = easy.get(key)
-    return str(val[0]).strip() or None if val else None
+    if not val:
+        return None
+    return str(val[0]).strip() or None
 
 
 def _easy_values(easy, key: str) -> list[str]:
@@ -768,6 +848,85 @@ def _coerce_result(data: dict) -> Optional[MetadataResult]:
     return MetadataResult(title=title, artists=artists, album=album, track_number=track_number, confidence=0.9)
 
 
+async def clean_metadata_for_duplicate(
+    path: Path,
+    *,
+    ollama_url: str,
+    model: str,
+    timeout: float,
+) -> Optional[MetadataResult]:
+    raw_tags = _parse_full_tags(path)
+    logging.info("[%s] 内容重复，准备本地元数据覆盖...", path.stem)
+    try:
+        llm = await _llm_clean(path.stem, raw_tags, ollama_url, model, timeout)
+    except Exception as exc:
+        _log_unhandled_exception(f"[{path.stem}] LLM 失败，使用文件标签作为覆盖来源", exc)
+        llm = None
+    if llm:
+        logging.info("[%s] 覆盖元数据: title=%r artists=%r", path.stem, llm.title, llm.artists)
+        return llm
+    fallback = _coerce_result(raw_tags)
+    if fallback:
+        logging.info("[%s] 使用文件标签覆盖: title=%r artists=%r", path.stem, fallback.title, fallback.artists)
+    else:
+        logging.warning("[%s] 无可用于覆盖的本地元数据", path.stem)
+    return fallback
+
+
+def _metadata_patch_payload(metadata: MetadataResult) -> dict:
+    payload: dict = {}
+    if metadata.title:
+        payload["title"] = metadata.title
+    if metadata.artists:
+        primary = str(metadata.artists[0]).strip()
+        if primary:
+            payload["artist_name"] = primary
+    if metadata.album:
+        payload["album_title"] = metadata.album
+    if metadata.track_number:
+        payload["track_number"] = metadata.track_number
+    return payload
+
+
+async def overwrite_duplicate_track_metadata(
+    track_id: int,
+    path: Path,
+    *,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    ollama_url: str,
+    model: str,
+    timeout: float,
+    request_timeout: float,
+) -> dict:
+    try:
+        import httpx
+    except ImportError:
+        return {"overwritten": False, "overwrite_error": "missing httpx"}
+
+    metadata = await clean_metadata_for_duplicate(
+        path,
+        ollama_url=ollama_url,
+        model=model,
+        timeout=timeout,
+    )
+    if metadata is None:
+        return {"overwritten": False, "overwrite_error": "无可用本地元数据"}
+
+    payload = _metadata_patch_payload(metadata)
+    if not payload:
+        return {"overwritten": False, "overwrite_error": "本地元数据为空"}
+
+    headers = _auth_headers(api_key, token)
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        r = await client.put(f"{base_url.rstrip('/')}/rest/x-banana/admin/tracks/{track_id}", json=payload)
+        r.raise_for_status()
+
+    logging.info("[%s] 已覆盖重复曲目元数据 track_id=%s fields=%s", path.name, track_id, sorted(payload))
+    return {"overwritten": True, "overwrite_fields": sorted(payload), "overwrite_metadata": asdict(metadata)}
+
+
 async def _llm_clean(
     filename_stem: str,
     raw_tags: dict,
@@ -843,17 +1002,7 @@ def _write_cleaned_tags(path: Path, llm: MetadataResult) -> bool:
             logging.warning("OGG 标签写入失败 %s: %s", path.name, exc)
             return False
     elif suffix == ".mp3":
-        try:
-            from mutagen.easyid3 import EasyID3
-            try:
-                audio = EasyID3(str(path))
-            except Exception:
-                import mutagen.id3
-                mutagen.id3.ID3().save(str(path))
-                audio = EasyID3(str(path))
-        except Exception as exc:
-            logging.warning("MP3 标签写入失败 %s: %s", path.name, exc)
-            return False
+        return _write_cleaned_tags_to_mp3(path, llm)
     elif suffix in (".m4a", ".aac"):
         try:
             from mutagen.easymp4 import EasyMP4
@@ -880,6 +1029,59 @@ def _write_cleaned_tags(path: Path, llm: MetadataResult) -> bool:
         return True
     except Exception as exc:
         logging.warning("标签保存失败 %s: %s", path.name, exc)
+        return False
+
+
+def _write_cleaned_tags_to_mp3(path: Path, llm: MetadataResult) -> bool:
+    artist_values = [str(x).strip() for x in llm.artists if str(x).strip()]
+    try:
+        from mutagen.easyid3 import EasyID3
+        try:
+            audio = EasyID3(str(path))
+        except Exception:
+            from mutagen.id3 import ID3
+            ID3().save(str(path), v2_version=3)
+            audio = EasyID3(str(path))
+
+        if llm.title:
+            audio["title"] = [llm.title]
+        if artist_values:
+            audio["artist"] = artist_values
+        if llm.album:
+            audio["album"] = [llm.album]
+        if llm.track_number:
+            audio["tracknumber"] = [str(llm.track_number)]
+        audio.save(v2_version=3)
+        logging.debug("MP3 EasyID3 标签写入完成: %s", path.name)
+        return True
+    except Exception as easy_exc:
+        logging.warning("MP3 EasyID3 标签写入失败 %s: %s；尝试直接写 ID3 帧", path.name, easy_exc)
+
+    try:
+        from mutagen.id3 import ID3, TALB, TIT2, TPE1, TRCK
+        try:
+            tags = ID3(str(path))
+        except Exception:
+            tags = ID3()
+
+        if llm.title:
+            tags.delall("TIT2")
+            tags.add(TIT2(encoding=3, text=[llm.title]))
+        if artist_values:
+            tags.delall("TPE1")
+            tags.add(TPE1(encoding=3, text=artist_values))
+        if llm.album:
+            tags.delall("TALB")
+            tags.add(TALB(encoding=3, text=[llm.album]))
+        if llm.track_number:
+            tags.delall("TRCK")
+            tags.add(TRCK(encoding=3, text=[str(llm.track_number)]))
+
+        tags.save(str(path), v2_version=3)
+        logging.debug("MP3 ID3 标签写入完成: %s", path.name)
+        return True
+    except Exception as exc:
+        logging.warning("MP3 ID3 标签写入失败 %s: %s", path.name, exc)
         return False
 
 
@@ -1087,6 +1289,77 @@ def _prepare_upload_copy(src: Path, tmp_dir: Path) -> Optional[Path]:
     return dst
 
 
+def _suffix_from_content_type(content_type: str | None) -> str:
+    ct = (content_type or "").split(";", 1)[0].strip().lower()
+    mapping = {
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/flac": ".flac",
+        "audio/x-flac": ".flac",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/aac": ".aac",
+        "audio/mp4": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/ogg": ".ogg",
+        "application/ogg": ".ogg",
+    }
+    return mapping.get(ct, "")
+
+
+def _filename_from_url(url: str, content_type: str | None) -> str:
+    parsed = urllib.parse.urlparse(url)
+    name = Path(urllib.parse.unquote(parsed.path)).name
+    suffix = Path(name).suffix.lower()
+    if suffix not in SUPPORTED_EXTS:
+        ext = _suffix_from_content_type(content_type) or ".mp3"
+        digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+        stem = Path(name).stem if name else f"remote-{digest}"
+        name = f"{stem}{ext}"
+    return name
+
+
+async def download_remote_playlist_entry(
+    url: str,
+    tmp_dir: Path,
+    *,
+    request_timeout: float,
+) -> Path:
+    try:
+        import httpx
+    except ImportError as exc:
+        raise RuntimeError("请安装 httpx: pip install httpx") from exc
+
+    logging.info("下载远程播放列表条目: %s", url)
+    async with httpx.AsyncClient(timeout=request_timeout, follow_redirects=True) as client:
+        resp = await client.get(url)
+        resp.raise_for_status()
+        filename = _filename_from_url(str(resp.url), resp.headers.get("content-type"))
+        dst = tmp_dir / filename
+        if dst.exists():
+            digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:12]
+            dst = tmp_dir / f"{dst.stem}.{digest}{dst.suffix}"
+        dst.write_bytes(resp.content)
+        return dst
+
+
+async def resolve_playlist_entry_to_path(
+    entry: PlaylistEntry,
+    tmp_dir: Path,
+    *,
+    request_timeout: float,
+) -> Path:
+    if entry.path is not None:
+        return entry.path
+    if entry.url:
+        return await download_remote_playlist_entry(
+            entry.url,
+            tmp_dir,
+            request_timeout=request_timeout,
+        )
+    raise RuntimeError(f"无效播放列表条目: {entry.source}")
+
+
 async def clean_tags_in_place(path: Path, *, ollama_url: str, model: str, timeout: float) -> tuple[Optional[MetadataResult], dict | None]:
     raw_tags = _parse_full_tags(path)
     logging.info("[%s] 查重通过，调用 Ollama (%s)...", path.stem, model)
@@ -1102,8 +1375,7 @@ async def clean_tags_in_place(path: Path, *, ollama_url: str, model: str, timeou
 
     logging.info("[%s] LLM 结果: title=%r artists=%r", path.stem, llm.title, llm.artists)
     if not _write_cleaned_tags(path, llm):
-        logging.warning("[%s] LLM 清洗结果写入失败，跳过上传", path.stem)
-        return None, {"file": str(path), "status": "skipped", "detail": "LLM清洗结果写入失败"}
+        logging.warning("[%s] LLM 清洗结果写入文件标签失败，将随 create 请求提交元数据", path.stem)
     return llm, None
 
 
@@ -1142,6 +1414,7 @@ async def upload_file_to_backend(
     api_key: Optional[str],
     token: Optional[str],
     parse_metadata: bool,
+    metadata: Optional[MetadataResult] = None,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -1167,6 +1440,13 @@ async def upload_file_to_backend(
             raise RuntimeError(f"上传完成但缺少 file_key: {state}")
 
         payload = {"file_key": file_key, "parse_metadata": parse_metadata}
+        if metadata is not None:
+            payload["metadata"] = {
+                "title": metadata.title,
+                "artists": metadata.artists,
+                "album": metadata.album,
+                "track_number": metadata.track_number,
+            }
 
         logging.info("[%s] 写入曲库...", path.name)
         created = await client.post(
@@ -1203,6 +1483,86 @@ async def login_to_backend(
     if not token:
         raise RuntimeError(f"登录成功但响应缺少 access_token: {body}")
     return str(token)
+
+
+def _next_playlist_name(base_name: str, existing_casefold_names: set[str]) -> str:
+    index = 2
+    while True:
+        candidate = f"{base_name} ({index})"
+        if candidate.casefold() not in existing_casefold_names:
+            return candidate
+        index += 1
+
+
+async def get_or_create_playlist(
+    client,
+    *,
+    base_url: str,
+    name: str,
+    description: Optional[str] = None,
+) -> int:
+    normalized = name.strip()
+    if not normalized:
+        raise RuntimeError("播放列表名称不能为空")
+
+    r = await client.get(f"{base_url}/rest/getPlaylists")
+    r.raise_for_status()
+    playlists = r.json()
+    existing_names = {
+        str(playlist.get("name", "")).strip().casefold()
+        for playlist in playlists
+        if str(playlist.get("name", "")).strip()
+    }
+    target_name = normalized
+    for playlist in playlists:
+        if str(playlist.get("name", "")).strip().casefold() == normalized.casefold():
+            playlist_id = playlist.get("id")
+            if playlist_id is None:
+                break
+            if int(playlist.get("track_count") or 0) == 0:
+                logging.info("[%s] 复用已有空播放列表 id=%s", normalized, playlist_id)
+                return int(playlist_id)
+            target_name = _next_playlist_name(normalized, existing_names)
+            logging.info(
+                "[%s] 已存在且非空，改为创建新播放列表: %s",
+                normalized,
+                target_name,
+            )
+            break
+
+    payload = {
+        "name": target_name,
+        "description": description,
+        "art_color": "art-1",
+    }
+    r = await client.post(f"{base_url}/rest/createPlaylist", json=payload)
+    if r.status_code == 409:
+        # 并发或大小写差异导致的同名冲突，重新读取后继续找一个未占用名称。
+        r2 = await client.get(f"{base_url}/rest/getPlaylists")
+        r2.raise_for_status()
+        existing_names = {
+            str(playlist.get("name", "")).strip().casefold()
+            for playlist in r2.json()
+            if str(playlist.get("name", "")).strip()
+        }
+        payload["name"] = _next_playlist_name(normalized, existing_names)
+        r = await client.post(f"{base_url}/rest/createPlaylist", json=payload)
+    r.raise_for_status()
+    body = r.json()
+    playlist_id = body.get("id")
+    if playlist_id is None:
+        raise RuntimeError(f"创建播放列表成功但响应缺少 id: {body}")
+    logging.info("[%s] 已创建播放列表 id=%s", body.get("name") or payload["name"], playlist_id)
+    return int(playlist_id)
+
+
+async def add_track_to_playlist(client, *, base_url: str, playlist_id: int, track_id: int) -> None:
+    r = await client.post(
+        f"{base_url}/rest/addToPlaylist",
+        params={"id": playlist_id},
+        json={"track_id": track_id},
+    )
+    r.raise_for_status()
 
 
 async def resolve_upload_token(args: argparse.Namespace) -> Optional[str]:
@@ -1254,6 +1614,11 @@ def _add_upload_options(parser: argparse.ArgumentParser, *, include_upload_flag:
         default=True,
         action=argparse.BooleanOptionalAction,
         help="是否在上传写库后入队服务端 parse_upload 元数据清洗（默认开启；批量导入已预处理时建议 --no-parse-metadata）",
+    )
+    parser.add_argument(
+        "--overwrite-duplicates",
+        action="store_true",
+        help="遇到重复内容时不重新上传音频，而是用本地元数据覆盖服务器已有曲目（默认关闭；需要管理员权限）",
     )
     parser.add_argument("--poll-interval", default=0.8, type=float, help="上传任务轮询间隔秒数（默认 0.8）")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数（默认 120）")
@@ -1343,6 +1708,18 @@ async def _run_process(args: argparse.Namespace) -> None:
                         request_timeout=args.request_timeout,
                     )
                     if duplicate:
+                        if args.overwrite_duplicates and duplicate.get("track_id"):
+                            duplicate.update(await overwrite_duplicate_track_metadata(
+                                int(duplicate["track_id"]),
+                                final_path,
+                                base_url=args.base_url,
+                                api_key=args.api_key,
+                                token=upload_token,
+                                ollama_url=args.ollama_url.rstrip("/"),
+                                model=args.model,
+                                timeout=args.timeout,
+                                request_timeout=args.request_timeout,
+                            ))
                         result["upload_result"] = duplicate
                         results.append(result)
                         continue
@@ -1366,6 +1743,7 @@ async def _run_process(args: argparse.Namespace) -> None:
                         api_key=args.api_key,
                         token=upload_token,
                         parse_metadata=False if llm_result is not None else args.parse_metadata,
+                        metadata=llm_result,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
@@ -1382,50 +1760,218 @@ async def _run_process(args: argparse.Namespace) -> None:
     logging.info("全部完成")
 
 
+async def upload_audio_path_for_bulk(
+    path: Path,
+    *,
+    tmp_dir: Path,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    ollama_url: str,
+    model: str,
+    timeout: float,
+    overwrite_duplicates: bool,
+    poll_interval: float,
+    job_timeout: float,
+    request_timeout: float,
+) -> dict:
+    dst = _prepare_upload_copy(path, tmp_dir)
+    if dst is None:
+        return {"source_file": str(path), "status": "skipped", "detail": "预处理失败"}
+
+    duplicate = await find_duplicate_by_hash(
+        dst,
+        base_url=base_url,
+        api_key=api_key,
+        token=token,
+        request_timeout=request_timeout,
+    )
+    if duplicate:
+        if overwrite_duplicates and duplicate.get("track_id"):
+            duplicate.update(await overwrite_duplicate_track_metadata(
+                int(duplicate["track_id"]),
+                dst,
+                base_url=base_url,
+                api_key=api_key,
+                token=token,
+                ollama_url=ollama_url,
+                model=model,
+                timeout=timeout,
+                request_timeout=request_timeout,
+            ))
+        return {"source_file": str(path), **duplicate}
+
+    llm, skipped = await clean_tags_in_place(
+        dst,
+        ollama_url=ollama_url,
+        model=model,
+        timeout=timeout,
+    )
+    if skipped:
+        return {"source_file": str(path), **skipped}
+
+    uploaded = await upload_file_to_backend(
+        dst,
+        base_url=base_url,
+        api_key=api_key,
+        token=token,
+        parse_metadata=False,
+        metadata=llm,
+        poll_interval=poll_interval,
+        job_timeout=job_timeout,
+        request_timeout=request_timeout,
+    )
+    return {"source_file": str(path), "llm_result": asdict(llm), **uploaded}
+
+
+async def import_playlist_to_backend(
+    playlist_path: Path,
+    *,
+    tmp_dir: Path,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    ollama_url: str,
+    model: str,
+    timeout: float,
+    overwrite_duplicates: bool,
+    poll_interval: float,
+    job_timeout: float,
+    request_timeout: float,
+) -> dict:
+    playlist_name, entries = parse_m3u_playlist(playlist_path)
+    result: dict = {
+        "file": str(playlist_path),
+        "status": "playlist",
+        "playlist_name": playlist_name,
+        "playlist_id": None,
+        "tracks": [],
+    }
+    if not entries:
+        result["status"] = "skipped"
+        result["detail"] = "播放列表无可导入音频"
+        return result
+
+    try:
+        import httpx
+    except ImportError:
+        result["status"] = "error"
+        result["detail"] = "missing httpx"
+        return result
+
+    headers = _auth_headers(api_key, token)
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        playlist_id = await get_or_create_playlist(
+            client,
+            base_url=base_url,
+            name=playlist_name,
+            description=f"Imported from {playlist_path.name}",
+        )
+        result["playlist_id"] = playlist_id
+
+        added, duplicate, skipped, failed = 0, 0, 0, 0
+        for index, entry in enumerate(entries, start=1):
+            entry_label = entry.url or str(entry.path or entry.source)
+            logging.info("[%s] 导入第 %d/%d 首: %s", playlist_path.name, index, len(entries), entry_label)
+            try:
+                audio_path = await resolve_playlist_entry_to_path(
+                    entry,
+                    tmp_dir,
+                    request_timeout=request_timeout,
+                )
+                upload_result = await upload_audio_path_for_bulk(
+                    audio_path,
+                    tmp_dir=tmp_dir,
+                    base_url=base_url,
+                    api_key=api_key,
+                    token=token,
+                    ollama_url=ollama_url,
+                    model=model,
+                    timeout=timeout,
+                    overwrite_duplicates=overwrite_duplicates,
+                    poll_interval=poll_interval,
+                    job_timeout=job_timeout,
+                    request_timeout=request_timeout,
+                )
+                upload_result["source_file"] = entry_label
+                track_id = upload_result.get("track_id")
+                if track_id:
+                    await add_track_to_playlist(
+                        client,
+                        base_url=base_url,
+                        playlist_id=playlist_id,
+                        track_id=int(track_id),
+                    )
+                status = upload_result.get("status")
+                if status == "added":
+                    added += 1
+                elif status == "duplicate":
+                    duplicate += 1
+                elif status == "skipped":
+                    skipped += 1
+                elif status == "error":
+                    failed += 1
+                result["tracks"].append(upload_result)
+            except Exception as exc:
+                _log_unhandled_exception(f"[{playlist_path}:{entry_label}] 导入失败", exc)
+                result["tracks"].append({"source_file": entry_label, "status": "error", "detail": str(exc)})
+                failed += 1
+
+    result["summary"] = {
+        "added": added,
+        "duplicate": duplicate,
+        "skipped": skipped,
+        "failed": failed,
+        "total": len(entries),
+    }
+    logging.info(
+        "[%s] 播放列表导入完成：新增 %d  重复 %d  跳过 %d  失败 %d",
+        playlist_path.name,
+        added,
+        duplicate,
+        skipped,
+        failed,
+    )
+    return result
+
+
 async def _run_upload(args: argparse.Namespace) -> None:
     results: list[dict] = []
     upload_token = await resolve_upload_token(args)
     with tempfile.TemporaryDirectory(prefix="banana-bulk-upload-") as tmp:
         tmp_dir = Path(tmp)
-        for path in _expand_paths(args.files, SUPPORTED_EXTS):
+        for path in _expand_paths(args.files, SUPPORTED_EXTS | PLAYLIST_EXTS):
             try:
-                dst = _prepare_upload_copy(path, tmp_dir)
-                if dst is None:
-                    results.append({"source_file": str(path), "status": "skipped", "detail": "预处理失败"})
-                    continue
-
-                duplicate = await find_duplicate_by_hash(
-                    dst,
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    token=upload_token,
-                    request_timeout=args.request_timeout,
-                )
-                if duplicate:
-                    results.append({"source_file": str(path), **duplicate})
-                    continue
-
-                llm, skipped = await clean_tags_in_place(
-                    dst,
-                    ollama_url=args.ollama_url.rstrip("/"),
-                    model=args.model,
-                    timeout=args.timeout,
-                )
-                if skipped:
-                    results.append({"source_file": str(path), **skipped})
-                    continue
-
-                uploaded = await upload_file_to_backend(
-                    dst,
-                    base_url=args.base_url,
-                    api_key=args.api_key,
-                    token=upload_token,
-                    parse_metadata=False,
-                    poll_interval=args.poll_interval,
-                    job_timeout=args.job_timeout,
-                    request_timeout=args.request_timeout,
-                )
-                results.append({"source_file": str(path), "llm_result": asdict(llm), **uploaded})
+                if path.suffix.lower() in PLAYLIST_EXTS:
+                    results.append(await import_playlist_to_backend(
+                        path,
+                        tmp_dir=tmp_dir,
+                        base_url=args.base_url.rstrip("/"),
+                        api_key=args.api_key,
+                        token=upload_token,
+                        ollama_url=args.ollama_url.rstrip("/"),
+                        model=args.model,
+                        timeout=args.timeout,
+                        overwrite_duplicates=args.overwrite_duplicates,
+                        poll_interval=args.poll_interval,
+                        job_timeout=args.job_timeout,
+                        request_timeout=args.request_timeout,
+                    ))
+                else:
+                    results.append(await upload_audio_path_for_bulk(
+                        path,
+                        tmp_dir=tmp_dir,
+                        base_url=args.base_url,
+                        api_key=args.api_key,
+                        token=upload_token,
+                        ollama_url=args.ollama_url.rstrip("/"),
+                        model=args.model,
+                        timeout=args.timeout,
+                        overwrite_duplicates=args.overwrite_duplicates,
+                        poll_interval=args.poll_interval,
+                        job_timeout=args.job_timeout,
+                        request_timeout=args.request_timeout,
+                    ))
             except Exception as exc:
                 _log_unhandled_exception(f"[{path}] 上传失败", exc)
                 results.append({"file": str(path), "status": "error", "detail": str(exc)})

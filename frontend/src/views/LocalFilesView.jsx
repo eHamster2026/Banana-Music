@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import { apiFetch } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
 import useMainScrollPager from '../hooks/useMainScrollPager'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 const PAGE_SIZE = 100
 
@@ -98,6 +99,7 @@ export default function LocalFilesView() {
     return () => window.removeEventListener('localFilesUpdated', silentRefresh)
   }, [silentRefresh])
 
+  usePageRefresh(silentRefresh)
   useMainScrollPager({ hasMore, onLoadMore: loadPage })
 
   async function toggleLike(track) {

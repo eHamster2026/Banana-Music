@@ -4,6 +4,7 @@ import { useNav } from '../contexts/NavContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function Sidebar() {
   const { t } = useTranslation()
@@ -30,6 +31,8 @@ export default function Sidebar() {
     window.addEventListener('playlistsUpdated', reloadPlaylists)
     return () => window.removeEventListener('playlistsUpdated', reloadPlaylists)
   }, [reloadPlaylists])
+
+  usePageRefresh(reloadPlaylists)
 
   function handleUserClick() {
     if (token) logout()

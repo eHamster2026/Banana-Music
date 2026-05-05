@@ -36,4 +36,5 @@ def test_openapi_create_track_accepts_parse_metadata_flag():
     props = req.get("properties", {})
     assert "file_key" in props
     assert "parse_metadata" in props
+    assert "metadata" in props
     assert props["parse_metadata"].get("default") is True

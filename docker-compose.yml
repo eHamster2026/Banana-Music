@@ -2,15 +2,11 @@ services:
 
   # ── 主应用 ────────────────────────────────────────────────────────────────────
   banana-music:
-    build:
-      context: .
-      target: production
+    image: ehamster2026/banana-music:latest
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "8000:8000"
     environment:
       APP_ENV: production      # 禁用开发模式自动 schema 重置
-    env_file:
-      - .env
     volumes:
       - ./data:/app/data       # 数据库与上传文件持久化
       - ./plugins:/app/plugins # 挂载插件目录，宿主机可直接编辑 config.json
@@ -24,7 +20,7 @@ services:
   solara:
     image: 1555904/solara-music:latest
     ports:
-      - "${SOLARA_PORT:-3001}:3001"
+      - "3001:3001"
     restart: unless-stopped
 
   # ── Ollama LLM 推理（llm-metadata 插件后端）──────────────────────────────────
@@ -42,7 +38,7 @@ services:
   ollama:
     image: ollama/ollama:latest
     ports:
-      - "${OLLAMA_PORT:-11434}:11434"
+      - "11434:11434"
     volumes:
       - ollama-data:/root/.ollama   # 模型文件持久化（避免每次重建重新拉取）
     restart: unless-stopped

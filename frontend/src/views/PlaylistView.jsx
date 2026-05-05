@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
@@ -6,6 +6,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
 import { apiFetch, fmtTime } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px'
 
@@ -18,8 +19,9 @@ export default function PlaylistView({ id }) {
   const [playlist, setPlaylist] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  function loadPlaylist() {
+  const loadPlaylist = useCallback(({ initial = false } = {}) => {
     if (!id) return
+    if (initial) setLoading(true)
     apiFetch('/rest/getPlaylist?id=' + id, {}, token)
       .then(data => {
         setPlaylist(data)
@@ -28,12 +30,11 @@ export default function PlaylistView({ id }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }
+  }, [id, token, setTopbarTitle, setContextQueue])
 
   useEffect(() => {
-    setLoading(true)
-    loadPlaylist()
-  }, [id])
+    loadPlaylist({ initial: true })
+  }, [loadPlaylist])
 
   useEffect(() => {
     function onUpdate(e) {
@@ -41,7 +42,9 @@ export default function PlaylistView({ id }) {
     }
     window.addEventListener('playlistTracksUpdated', onUpdate)
     return () => window.removeEventListener('playlistTracksUpdated', onUpdate)
-  }, [id, token])
+  }, [id, loadPlaylist])
+
+  usePageRefresh(loadPlaylist, { enabled: Boolean(id) })
 
   async function removeTrack(trackId) {
     if (!token) return

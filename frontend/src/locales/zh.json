@@ -171,6 +171,8 @@
     "notFound": "专辑未找到",
     "typeLabel": "专辑",
     "trackCount": "{{count}} 首歌曲",
+    "save": "收藏",
+    "saved": "已收藏",
     "addToLiked": "已添加到收藏",
     "removeFromLiked": "已取消收藏",
     "likeFailed": "操作失败"
@@ -183,6 +185,8 @@
     "typeLabel": "艺人",
     "sectionTracks": "热门歌曲",
     "sectionAlbums": "专辑",
+    "follow": "关注",
+    "following": "已关注",
     "followed": "已关注",
     "unfollowed": "已取消关注",
     "followFailed": "操作失败"

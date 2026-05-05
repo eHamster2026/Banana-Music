@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { useAuth } from '../contexts/AuthContext'
@@ -6,6 +6,7 @@ import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
 import AlbumCard from '../components/shared/AlbumCard'
 import ArtistCard from '../components/shared/ArtistCard'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function HomeView() {
   const { t } = useTranslation()
@@ -17,8 +18,9 @@ export default function HomeView() {
   const [artists, setArtists]       = useState([])
   const [loading, setLoading]       = useState(true)
 
-  useEffect(() => {
+  const loadHome = useCallback(({ initial = false } = {}) => {
     if (!token) { setLoading(false); return }
+    if (initial) setLoading(true)
     Promise.all([
       apiFetch('/rest/getPlaylists', {}, token).catch(() => []),
       apiFetch('/rest/getStarred2?includeMeta=true', {}, token).catch(() => ({})),
@@ -30,15 +32,20 @@ export default function HomeView() {
     })
   }, [token])
 
+  useEffect(() => {
+    loadHome({ initial: true })
+  }, [loadHome])
+
   // Reload playlists when a new one is created
   useEffect(() => {
     function reload() {
-      if (!token) return
-      apiFetch('/rest/getPlaylists', {}, token).then(d => setPlaylists(d || []))
+      loadHome()
     }
     window.addEventListener('playlistsUpdated', reload)
     return () => window.removeEventListener('playlistsUpdated', reload)
-  }, [token])
+  }, [loadHome])
+
+  usePageRefresh(loadHome, { enabled: Boolean(token) })
 
   if (!token) {
     return (
@@ -111,8 +118,8 @@ export default function HomeView() {
             <div className="section-title">{t('home.sectionAlbums')}</div>
             <div className="section-more" onClick={() => navigate('albums', {}, t('albums.pageTitle'))}>{t('common.viewAll')}</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 16 }}>
-            {albums.slice(0, 8).map(album => (
+          <div className="album-row">
+            {albums.map(album => (
               <AlbumCard key={album.id} album={album} />
             ))}
           </div>
@@ -126,8 +133,8 @@ export default function HomeView() {
             <div className="section-title">{t('home.sectionArtists')}</div>
             <div className="section-more" onClick={() => navigate('artists', {}, t('artists.pageTitle'))}>{t('common.viewAll')}</div>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(110px, 1fr))', gap: 16 }}>
-            {artists.slice(0, 10).map(artist => (
+          <div className="artist-row">
+            {artists.map(artist => (
               <ArtistCard key={artist.id} artist={artist} />
             ))}
           </div>

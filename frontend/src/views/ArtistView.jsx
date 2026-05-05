@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import { apiFetch } from '../api.js'
 import AlbumCard from '../components/shared/AlbumCard'
 import TrackRow from '../components/shared/TrackRow'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function ArtistView({ id }) {
   const { t } = useTranslation()
@@ -20,9 +21,9 @@ export default function ArtistView({ id }) {
   const [loading, setLoading]     = useState(true)
   const [inLibrary, setInLibrary] = useState(false)
 
-  useEffect(() => {
+  const loadArtist = useCallback(({ initial = false } = {}) => {
     if (!id) return
-    setLoading(true)
+    if (initial) setLoading(true)
     Promise.all([
       apiFetch('/rest/getArtist?id=' + id, {}, token),
       apiFetch('/rest/getArtistAlbums?id=' + id, {}, token).catch(() => []),
@@ -35,14 +36,29 @@ export default function ArtistView({ id }) {
       setContextQueue(trs || [])
       setLoading(false)
     }).catch(() => setLoading(false))
-  }, [id])
+  }, [id, token, setTopbarTitle, setContextQueue])
 
-  useEffect(() => {
+  const loadLibraryState = useCallback(() => {
     if (!id || !token) return
     apiFetch('/rest/getStarred2?includeMeta=true', {}, token)
       .then(d => setInLibrary((d.artists || []).some(artist => String(artist.id) === String(id))))
       .catch(() => {})
   }, [id, token])
+
+  const refreshArtist = useCallback(() => {
+    loadArtist()
+    loadLibraryState()
+  }, [loadArtist, loadLibraryState])
+
+  useEffect(() => {
+    loadArtist({ initial: true })
+  }, [loadArtist])
+
+  useEffect(() => {
+    loadLibraryState()
+  }, [loadLibraryState])
+
+  usePageRefresh(refreshArtist, { enabled: Boolean(id) })
 
   async function toggleArtistLibrary() {
     if (!token) { showToast(t('common.loginFirst')); return }
@@ -100,13 +116,13 @@ export default function ArtistView({ id }) {
           <button
             className={`detail-lib-btn${inLibrary ? ' active' : ''}`}
             onClick={toggleArtistLibrary}
-            title={inLibrary ? t('artists.unfollowed') : t('artists.followed')}
+            title={inLibrary ? t('artists.following') : t('artists.follow')}
             style={{ marginBottom: 4 }}
           >
             <svg viewBox="0 0 16 16" fill={inLibrary ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={inLibrary ? 0 : 1.5}>
               <path d="M8 13.5a.75.75 0 01-.53-.22l-5.47-5.47a3.75 3.75 0 015.3-5.3L8 3.19l.7-.7a3.75 3.75 0 115.3 5.3L8.53 13.28A.75.75 0 018 13.5z"/>
             </svg>
-            {inLibrary ? t('artists.followed') : t('artists.followed')}
+            {inLibrary ? t('artists.following') : t('artists.follow')}
           </button>
         </div>
       </div>

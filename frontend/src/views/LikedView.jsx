@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function LikedView() {
   const { t } = useTranslation()
@@ -18,8 +19,9 @@ export default function LikedView() {
   const [tracks, setTracks] = useState([])
   const [loading, setLoading] = useState(true)
 
-  function loadTracks() {
+  const loadTracks = useCallback(({ initial = false } = {}) => {
     if (!token) { setLoading(false); return }
+    if (initial) setLoading(true)
     apiFetch('/rest/getStarred2', {}, token)
       .then(data => {
         setTracks(data || [])
@@ -27,20 +29,22 @@ export default function LikedView() {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }
+  }, [token, setContextQueue])
 
   useEffect(() => {
     setTopbarTitle(t('liked.pageTitle'))
   }, [t, setTopbarTitle])
 
   useEffect(() => {
-    loadTracks()
-  }, [token])
+    loadTracks({ initial: true })
+  }, [loadTracks])
 
   useEffect(() => {
     window.addEventListener('likedTracksUpdated', loadTracks)
     return () => window.removeEventListener('likedTracksUpdated', loadTracks)
-  }, [token])
+  }, [loadTracks])
+
+  usePageRefresh(loadTracks, { enabled: Boolean(token) })
 
   async function toggleLike(track) {
     try {

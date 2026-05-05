@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
 import PlaylistCard from '../components/shared/PlaylistCard'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function AllPlaylistsView() {
   const { t } = useTranslation()
@@ -15,8 +16,8 @@ export default function AllPlaylistsView() {
   const [userPlaylists, setUserPlaylists] = useState([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    setTopbarTitle(t('allPlaylists.pageTitle'))
+  const loadPlaylists = useCallback(({ initial = false } = {}) => {
+    if (initial) setLoading(true)
     const fetches = [
       apiFetch('/rest/x-banana/home').then(d => d.featured_playlists || []).catch(() => []),
     ]
@@ -32,17 +33,21 @@ export default function AllPlaylistsView() {
     })
   }, [token, t, setTopbarTitle])
 
+  useEffect(() => {
+    setTopbarTitle(t('allPlaylists.pageTitle'))
+    loadPlaylists({ initial: true })
+  }, [t, setTopbarTitle, loadPlaylists])
+
   // Listen for playlist creation
   useEffect(() => {
     function reload() {
-      if (!token) return
-      apiFetch('/rest/getPlaylists', {}, token)
-        .then(data => setUserPlaylists(data || []))
-        .catch(() => {})
+      loadPlaylists()
     }
     window.addEventListener('playlistsUpdated', reload)
     return () => window.removeEventListener('playlistsUpdated', reload)
-  }, [token])
+  }, [loadPlaylists])
+
+  usePageRefresh(loadPlaylists)
 
   if (loading) return <div className="loading-wrap"><div className="spinner" /></div>
 

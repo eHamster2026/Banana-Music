@@ -171,6 +171,8 @@
     "notFound": "Album not found",
     "typeLabel": "Album",
     "trackCount": "{{count}} tracks",
+    "save": "Save",
+    "saved": "Saved",
     "addToLiked": "Added to saved",
     "removeFromLiked": "Removed from saved",
     "likeFailed": "Action failed"
@@ -183,6 +185,8 @@
     "typeLabel": "Artist",
     "sectionTracks": "Popular songs",
     "sectionAlbums": "Albums",
+    "follow": "Follow",
+    "following": "Following",
     "followed": "Followed",
     "unfollowed": "Unfollowed",
     "followFailed": "Action failed"

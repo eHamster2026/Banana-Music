@@ -958,14 +958,79 @@ def _process_uploaded_file_sync(
 
 # ── Pydantic 模型 ─────────────────────────────────────────────
 
+class CreateTrackMetadata(BaseModel):
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    artists: list[str] = Field(default_factory=list)
+    album: Optional[str] = None
+    album_artist: Optional[str] = None
+    album_artists: list[str] = Field(default_factory=list)
+    release_date: Optional[str] = None
+    track_number: Optional[int] = None
+    lyrics: Optional[str] = None
+
+
 class CreateTrackRequest(BaseModel):
     file_key: str
     parse_metadata: bool = Field(
         True,
         description="是否入队执行 parse_upload 元数据清洗；false 时仅使用文件内嵌标签写库",
     )
-    # 元数据由服务端从上传缓存（LLM 清洗结果 → 文件标签 → 文件名）自动解析，
-    # 客户端无需提交。audio_hash / duration_sec 等均从缓存读取。
+    metadata: Optional[CreateTrackMetadata] = Field(
+        None,
+        description="可选客户端已清洗元数据；用于 bulk_import 等批量导入场景，优先于文件内嵌标签",
+    )
+    # audio_hash / duration_sec 等均从上传缓存读取，客户端不可提交。
+
+
+def _apply_metadata_override(tag: dict, metadata: CreateTrackMetadata | None) -> dict:
+    if metadata is None:
+        return tag
+    out = dict(tag)
+    data = metadata.model_dump(exclude_none=True)
+
+    def cleaned(value) -> str | None:
+        return _clean_text(value)
+
+    for key in ("title", "album", "album_artist", "release_date", "lyrics"):
+        value = cleaned(data.get(key))
+        if value:
+            out[key] = value
+
+    artists = [
+        text
+        for text in (cleaned(x) for x in data.get("artists", []))
+        if text
+    ]
+    if not artists and cleaned(data.get("artist")):
+        artists = [cleaned(data.get("artist"))]
+    artists = dedupe_artist_names(artists)
+    if artists:
+        out["artists"] = artists
+        out["artist"] = artists[0]
+
+    album_artists = [
+        text
+        for text in (cleaned(x) for x in data.get("album_artists", []))
+        if text
+    ]
+    if not album_artists and cleaned(data.get("album_artist")):
+        album_artists = [cleaned(data.get("album_artist"))]
+    album_artists = dedupe_artist_names(album_artists)
+    if album_artists:
+        out["album_artists"] = album_artists
+        out["album_artist"] = album_artists[0]
+
+    track_number = data.get("track_number")
+    if track_number is not None:
+        try:
+            parsed_track_number = int(track_number)
+        except (TypeError, ValueError):
+            parsed_track_number = 0
+        if parsed_track_number > 0:
+            out["track_number"] = parsed_track_number
+
+    return out
 
 
 # ── 端点 ──────────────────────────────────────────────────────
@@ -1170,6 +1235,7 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
     loop = asyncio.get_event_loop()
     tag: dict | None = await loop.run_in_executor(_executor, _parse_tags, save_path)
     tag = tag or {}
+    tag = _apply_metadata_override(tag, req.metadata)
 
     # 无内嵌标题时不杜撰：不用文件名顶替（界面用 track id 占位）
     title        = _clean_text(tag.get("title")) or ""

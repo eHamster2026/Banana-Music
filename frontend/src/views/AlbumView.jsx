@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
@@ -7,6 +7,7 @@ import { useToast } from '../contexts/ToastContext'
 import { apiFetch, fmtTime, formatAlbumArtists } from '../api.js'
 import TrackRow from '../components/shared/TrackRow'
 import CoverArt from '../components/shared/CoverArt'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function AlbumView({ id }) {
   const { t } = useTranslation()
@@ -18,9 +19,9 @@ export default function AlbumView({ id }) {
   const [loading, setLoading]   = useState(true)
   const [inLibrary, setInLibrary] = useState(false)
 
-  useEffect(() => {
+  const loadAlbum = useCallback(({ initial = false } = {}) => {
     if (!id) return
-    setLoading(true)
+    if (initial) setLoading(true)
     apiFetch('/rest/getAlbum?id=' + id, {}, token)
       .then(data => {
         setAlbum(data)
@@ -29,14 +30,29 @@ export default function AlbumView({ id }) {
         setLoading(false)
       })
       .catch(() => setLoading(false))
-  }, [id])
+  }, [id, token, setTopbarTitle, setContextQueue])
 
-  useEffect(() => {
+  const loadLibraryState = useCallback(() => {
     if (!id || !token) return
     apiFetch('/rest/getStarred2?includeMeta=true', {}, token)
       .then(d => setInLibrary((d.albums || []).some(album => String(album.id) === String(id))))
       .catch(() => {})
   }, [id, token])
+
+  const refreshAlbum = useCallback(() => {
+    loadAlbum()
+    loadLibraryState()
+  }, [loadAlbum, loadLibraryState])
+
+  useEffect(() => {
+    loadAlbum({ initial: true })
+  }, [loadAlbum])
+
+  useEffect(() => {
+    loadLibraryState()
+  }, [loadLibraryState])
+
+  usePageRefresh(refreshAlbum, { enabled: Boolean(id) })
 
   async function toggleAlbumLibrary() {
     if (!token) { showToast(t('common.loginFirst')); return }
@@ -106,12 +122,12 @@ export default function AlbumView({ id }) {
             <button
               className={`detail-lib-btn${inLibrary ? ' active' : ''}`}
               onClick={toggleAlbumLibrary}
-              title={inLibrary ? t('albums.removeFromLiked') : t('albums.addToLiked')}
+              title={inLibrary ? t('albums.saved') : t('albums.save')}
             >
               <svg viewBox="0 0 16 16" fill={inLibrary ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth={inLibrary ? 0 : 1.5}>
                 <path d="M8 13.5a.75.75 0 01-.53-.22l-5.47-5.47a3.75 3.75 0 015.3-5.3L8 3.19l.7-.7a3.75 3.75 0 115.3 5.3L8.53 13.28A.75.75 0 018 13.5z"/>
               </svg>
-              {inLibrary ? t('albums.removeFromLiked') : t('albums.addToLiked')}
+              {inLibrary ? t('albums.saved') : t('albums.save')}
             </button>
           </div>
         </div>

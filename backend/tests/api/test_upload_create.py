@@ -133,3 +133,48 @@ async def test_create_track_parse_metadata_defaults_to_true(
     assert r.status_code == 200
     assert r.json()["status"] == "added"
     assert _parse_task_count() == 1
+
+
+@pytest.mark.asyncio
+async def test_create_track_metadata_override_takes_precedence(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
+    monkeypatch.setattr(
+        upload,
+        "_parse_tags",
+        lambda _path: {"title": "Raw Title", "artist": "Raw Artist"},
+    )
+    file_key = "c" * 64 + ".mp3"
+    _stage_upload(file_key, tmp_path)
+
+    r = await client.post(
+        "/rest/x-banana/tracks/create",
+        json={
+            "file_key": file_key,
+            "parse_metadata": False,
+            "metadata": {
+                "title": "Clean Title",
+                "artists": ["Clean Artist", "Guest Artist"],
+                "album": "Clean Album",
+                "track_number": 7,
+            },
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "added"
+    assert body["title"] == "Clean Title"
+    assert body["artists"] == ["Clean Artist", "Guest Artist"]
+
+    db = SessionLocal()
+    try:
+        track = db.get(models.Track, body["track_id"])
+        assert track.title == "Clean Title"
+        assert track.artist.name == "Clean Artist"
+        assert track.album.title == "Clean Album"
+        assert track.track_number == 7
+        assert [ta.artist.name for ta in track.track_artists] == ["Guest Artist"]
+    finally:
+        db.close()

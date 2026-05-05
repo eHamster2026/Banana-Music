@@ -6,6 +6,7 @@ import { usePlayer } from '../contexts/PlayerContext'
 import { useModal } from '../contexts/ModalContext'
 import { useNav } from '../contexts/NavContext'
 import { apiFetch, fmtTime, formatTrackArtists, displayTrackTitle } from '../api.js'
+import usePageRefresh from '../hooks/usePageRefresh'
 
 // ── 小工具 ────────────────────────────────────────────────────
 function Confirm({ msg, onOk, onCancel }) {
@@ -217,6 +218,13 @@ function TracksTab({ token }) {
   }, [token, q, t, showToast])
 
   useEffect(() => { load(0) }, [token])
+
+  usePageRefresh(
+    useCallback(() => {
+      if (!editingId) load(page, q)
+    }, [editingId, load, page, q]),
+    { enabled: Boolean(token) },
+  )
 
   function handleSearch(e) {
     e.preventDefault()
