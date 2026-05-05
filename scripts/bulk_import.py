@@ -626,6 +626,8 @@ class MetadataResult:
     title: Optional[str] = None
     artists: list = field(default_factory=list)
     album: Optional[str] = None
+    album_artist: Optional[str] = None
+    album_artists: list = field(default_factory=list)
     track_number: Optional[int] = None
     confidence: float = 0.0
 
@@ -1571,6 +1573,8 @@ async def upload_file_to_backend(
                 "title": metadata.title,
                 "artists": metadata.artists,
                 "album": metadata.album,
+                "album_artist": metadata.album_artist,
+                "album_artists": metadata.album_artists,
                 "track_number": metadata.track_number,
             }
 
