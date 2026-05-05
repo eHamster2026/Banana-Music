@@ -601,6 +601,70 @@ body {
   padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .admin-tab.active { background: rgba(252,60,68,0.16); border-color: rgba(252,60,68,0.35); color: var(--accent); }
+.admin-track-toolbar {
+  display: flex; gap: 12px; margin-bottom: 16px; align-items: center;
+}
+.admin-track-search {
+  display: flex; gap: 8px; flex: 1; min-width: 0;
+}
+.admin-table-wrap { overflow-x: auto; }
+.admin-mobile-list { display: none; }
+.admin-pagination {
+  display: flex; gap: 8px; justify-content: center; margin-top: 16px;
+}
+.admin-plugin-layout {
+  display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 18px;
+}
+.admin-mobile-card {
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--card); padding: 12px; min-width: 0;
+}
+.admin-mobile-card-main {
+  display: flex; align-items: center; gap: 10px; min-width: 0;
+}
+.admin-mobile-card-text { flex: 1; min-width: 0; }
+.admin-mobile-title {
+  color: var(--text); font-size: 14px; font-weight: 650;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.admin-mobile-sub {
+  margin-top: 3px; color: var(--text-secondary); font-size: 12px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.admin-mobile-play {
+  width: 34px; height: 34px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--hover); color: var(--text);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; cursor: pointer;
+}
+.admin-mobile-play:disabled { opacity: 0.35; cursor: default; }
+.admin-mobile-action {
+  border: 1px solid var(--border); border-radius: 7px; background: transparent;
+  color: var(--text); padding: 7px 10px; font-size: 12px; flex-shrink: 0;
+}
+.admin-mobile-meta {
+  display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px;
+  color: var(--text-secondary); font-size: 11px; min-width: 0;
+}
+.admin-mobile-meta span {
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  border-radius: 999px; background: var(--hover); padding: 3px 8px;
+}
+.admin-mobile-meta .ok {
+  background: rgba(39,174,96,0.18); color: #27ae60;
+}
+.admin-mobile-meta .danger {
+  background: rgba(231,76,60,0.16); color: #e74c3c;
+}
+.admin-mobile-actions {
+  display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px;
+}
+.admin-mobile-actions .btn-secondary {
+  flex: 1 1 120px; justify-content: center; font-size: 12px;
+}
+.admin-mobile-actions .danger {
+  border-color: rgba(231,76,60,0.35); color: #e74c3c;
+}
 .admin-auth-card {
   min-height: 360px; display: flex; flex-direction: column; align-items: center;
   justify-content: center; text-align: center; color: var(--text);
@@ -1029,6 +1093,55 @@ body {
     white-space: nowrap;
   }
 
+  .admin-track-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admin-track-search {
+    width: 100%;
+  }
+
+  .admin-track-search input {
+    min-width: 0;
+  }
+
+  .admin-track-toolbar > .btn-primary {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .admin-track-toolbar > span {
+    align-self: flex-start;
+  }
+
+  .admin-table-wrap {
+    display: none;
+  }
+
+  .admin-mobile-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .admin-pagination {
+    position: sticky;
+    bottom: calc(var(--player-height) + var(--mobile-nav-height) + 10px);
+    z-index: 5;
+    background: rgba(31,31,31,0.92);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px;
+    backdrop-filter: blur(10px);
+  }
+
+  .admin-plugin-layout {
+    display: flex;
+    flex-direction: column;
+  }
+
   .bottom-spacer {
     height: 24px;
   }
@@ -1163,5 +1276,34 @@ body {
   .mobile-bottom-item {
     padding-inline: 6px;
     font-size: 10.5px;
+  }
+
+  .admin-page {
+    padding: 18px 12px 28px;
+  }
+
+  .admin-track-search {
+    flex-direction: column;
+  }
+
+  .admin-track-search .btn-secondary {
+    justify-content: center;
+  }
+
+  .admin-mobile-card {
+    padding: 10px;
+  }
+
+  .admin-mobile-card-main {
+    gap: 8px;
+  }
+
+  .admin-mobile-play {
+    width: 32px;
+    height: 32px;
+  }
+
+  .admin-mobile-action {
+    padding-inline: 9px;
   }
 }

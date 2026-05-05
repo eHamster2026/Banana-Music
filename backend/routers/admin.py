@@ -13,6 +13,7 @@ from deps import get_db, get_admin_user
 from auth_utils import get_password_hash
 import models, schemas
 from routers.queue import remove_track_from_queues
+from services.track_load_options import track_out_load_options
 from services.track_metadata_update import update_track_with_metadata_patch
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -56,7 +57,7 @@ def list_tracks(
     db: Session = Depends(get_db),
     _admin: models.User = Depends(get_admin_user),
 ):
-    query = db.query(models.Track)
+    query = db.query(models.Track).options(*track_out_load_options())
     if q:
         query = query.filter(models.Track.title.ilike(f"%{q}%"))
     if missing_metadata:

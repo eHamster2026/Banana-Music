@@ -22,6 +22,7 @@ from routers import (
 from plugins.errors import PluginParseError, PluginUpstreamError
 from services.artist_names import UNKNOWN_ARTIST_NAMES
 from services.plugin_search import run_plugin_search_flat
+from services.track_load_options import track_out_load_options
 
 
 router = APIRouter(prefix="/rest", tags=["Rest"])
@@ -138,7 +139,7 @@ def get_songs(
     db: Session = Depends(get_db),
     user: Optional[models.User] = Depends(get_optional_user),
 ):
-    q = db.query(models.Track)
+    q = db.query(models.Track).options(*track_out_load_options())
     if local:
         q = q.filter(models.Track.stream_url.like("/resource/%"))
     if sort == "recent":
@@ -324,6 +325,7 @@ def get_artist_songs(
 ):
     return (
         db.query(models.Track)
+        .options(*track_out_load_options())
         .outerjoin(models.TrackArtist, models.TrackArtist.track_id == models.Track.id)
         .filter(or_(models.Track.artist_id == id, models.TrackArtist.artist_id == id))
         .order_by(models.Track.created_at.desc(), models.Track.id.desc())
@@ -357,6 +359,7 @@ async def search3(
 
     tracks = (
         db.query(models.Track)
+        .options(*track_out_load_options())
         .filter(or_(models.Track.title.ilike(like), models.Track.id.in_(featured_track_ids)))
         .limit(10)
         .all()

@@ -266,8 +266,8 @@ function TracksTab({ token }) {
     <div>
       {confirm && <Confirm msg={confirm.msg} onOk={confirm.onOk} onCancel={() => setConfirm(null)} />}
 
-      <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center' }}>
-        <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, flex: 1 }}>
+      <div className="admin-track-toolbar">
+        <form onSubmit={handleSearch} className="admin-track-search">
           <input
             value={q}
             onChange={e => setQ(e.target.value)}
@@ -287,7 +287,7 @@ function TracksTab({ token }) {
         <span style={{ fontSize: 12, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{t('admin.totalTracks', { total })}</span>
       </div>
 
-      <div style={{ overflowX: 'auto' }}>
+      <div className="admin-table-wrap">
         <table style={{ width: '100%', minWidth: 990, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
           <colgroup>
             {trackHeaders.map((h, idx) => (
@@ -383,8 +383,57 @@ function TracksTab({ token }) {
         </table>
       </div>
 
+      <div className="admin-mobile-list">
+        {tracks.map((track, i) => {
+          const artistText = formatTrackArtists(track) || '—'
+          const albumText = track.album?.title || '—'
+          const titleText = displayTrackTitle(track)
+          return (
+            <div className="admin-mobile-card" key={track.id}>
+              <div className="admin-mobile-card-main">
+                <button
+                  className="admin-mobile-play"
+                  onClick={() => playAll(i)}
+                  disabled={!track.stream_url}
+                  title={track.stream_url ? t('admin.playTrack') : t('admin.noFile')}
+                >
+                  {currentTrackId === track.id ? '♫' : '▶'}
+                </button>
+                <div className="admin-mobile-card-text">
+                  <div className="admin-mobile-title">{titleText}</div>
+                  <div className="admin-mobile-sub">{artistText}</div>
+                </div>
+                <button
+                  className="admin-mobile-action"
+                  onClick={() => setEditingId(editingId === track.id ? null : track.id)}
+                >
+                  {t('admin.edit', {defaultValue: t('common.edit')})}
+                </button>
+              </div>
+              <div className="admin-mobile-meta">
+                <span>#{track.id}</span>
+                <span>{albumText}</span>
+                <span>{fmtTime(track.duration_sec)}</span>
+                <span className={track.stream_url ? 'ok' : 'danger'}>
+                  {track.stream_url ? t('admin.hasFile') : t('admin.noFile')}
+                </span>
+              </div>
+              {editingId === track.id && (
+                <TrackEditForm
+                  track={track}
+                  token={token}
+                  onSave={handleSaved}
+                  onCancel={() => setEditingId(null)}
+                  onDeleteTrack={askDeleteTrack}
+                />
+              )}
+            </div>
+          )
+        })}
+      </div>
+
       {totalPages > 1 && (
-        <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 16 }}>
+        <div className="admin-pagination">
           <button className="btn-secondary" disabled={page === 0} onClick={() => load(page - 1)} style={{ fontSize: 13 }}>{t('admin.prevPage')}</button>
           <span style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: '32px' }}>{page + 1} / {totalPages}</span>
           <button className="btn-secondary" disabled={page >= totalPages - 1} onClick={() => load(page + 1)} style={{ fontSize: 13 }}>{t('admin.nextPage')}</button>
@@ -511,7 +560,8 @@ function UsersTab({ token, currentUser }) {
         </form>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+      <div className="admin-table-wrap">
+      <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse', fontSize: 13 }}>
         <thead>
           <tr style={{ borderBottom: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
             {[t('admin.colIdUser'), t('admin.colUsername'), t('admin.colEmail'), t('admin.colAdmin'), t('admin.colCreated'), t('admin.colActionsUser')].map(h => (
@@ -583,6 +633,54 @@ function UsersTab({ token, currentUser }) {
           ))}
         </tbody>
       </table>
+      </div>
+
+      <div className="admin-mobile-list">
+        {users.map(user => (
+          <div className="admin-mobile-card" key={user.id}>
+            <div className="admin-mobile-card-main">
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
+                background: `var(--${user.avatar_color || 'art-1'})`,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontSize: 14, fontWeight: 600, color: '#fff',
+              }}>
+                {user.username[0].toUpperCase()}
+              </div>
+              <div className="admin-mobile-card-text">
+                <div className="admin-mobile-title">
+                  {user.username}
+                  {user.id === currentUser?.id && (
+                    <span style={{ fontSize: 10, color: 'var(--accent)', marginLeft: 6 }}>{t('admin.youLabel')}</span>
+                  )}
+                </div>
+                <div className="admin-mobile-sub">{user.email}</div>
+              </div>
+            </div>
+            <div className="admin-mobile-meta">
+              <span>#{user.id}</span>
+              <span>{user.is_admin ? t('admin.roleAdmin') : t('admin.roleUser')}</span>
+              <span>{user.created_at ? new Date(user.created_at * 1000).toLocaleDateString('zh-CN') : '—'}</span>
+            </div>
+            <div className="admin-mobile-actions">
+              <button
+                onClick={() => toggleAdmin(user)}
+                disabled={user.id === currentUser?.id}
+                className="btn-secondary"
+              >
+                {user.is_admin ? t('admin.revokeAdmin') : t('admin.makeAdmin')}
+              </button>
+              <button
+                onClick={() => askDelete(user)}
+                disabled={user.id === currentUser?.id}
+                className="btn-secondary danger"
+              >
+                {t('admin.deleteUser')}
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -753,7 +851,7 @@ function PluginsTab({ token }) {
   }
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '320px minmax(0, 1fr)', gap: 18 }}>
+    <div className="admin-plugin-layout">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {plugins.map(plugin => (
           <button
