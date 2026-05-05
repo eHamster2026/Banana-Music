@@ -858,14 +858,16 @@ async def clean_metadata_for_duplicate(
     ollama_url: str,
     model: str,
     timeout: float,
+    skip_llm: bool = False,
 ) -> Optional[MetadataResult]:
     raw_tags = _parse_full_tags(path)
     logging.info("[%s] 内容重复，准备本地元数据覆盖...", path.stem)
-    try:
-        llm = await _llm_clean(path.stem, raw_tags, ollama_url, model, timeout)
-    except Exception as exc:
-        _log_unhandled_exception(f"[{path.stem}] LLM 失败，使用文件标签作为覆盖来源", exc)
-        llm = None
+    llm = None
+    if not skip_llm:
+        try:
+            llm = await _llm_clean(path.stem, raw_tags, ollama_url, model, timeout)
+        except Exception as exc:
+            _log_unhandled_exception(f"[{path.stem}] LLM 失败，使用文件标签作为覆盖来源", exc)
     if llm:
         logging.info("[%s] 覆盖元数据: title=%r artists=%r", path.stem, llm.title, llm.artists)
         return llm
@@ -970,6 +972,7 @@ async def overwrite_duplicate_track_metadata(
     model: str,
     timeout: float,
     request_timeout: float,
+    skip_llm: bool = False,
 ) -> dict:
     try:
         import httpx
@@ -981,6 +984,7 @@ async def overwrite_duplicate_track_metadata(
         ollama_url=ollama_url,
         model=model,
         timeout=timeout,
+        skip_llm=skip_llm,
     )
     if metadata is None:
         return {"overwritten": False, "overwrite_error": "无可用本地元数据"}
@@ -1009,6 +1013,7 @@ async def update_duplicate_track_metadata(
     model: str,
     timeout: float,
     request_timeout: float,
+    skip_llm: bool = False,
 ) -> dict:
     try:
         import httpx
@@ -1020,6 +1025,7 @@ async def update_duplicate_track_metadata(
         ollama_url=ollama_url,
         model=model,
         timeout=timeout,
+        skip_llm=skip_llm,
     )
     if metadata is None:
         return {"updated": False, "update_error": "无可用本地元数据"}
@@ -1720,7 +1726,12 @@ def _add_llm_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--timeout", default=120.0, type=float, help="LLM 调用超时秒数（默认 120）")
 
 
-def _add_upload_options(parser: argparse.ArgumentParser, *, include_upload_flag: bool = False) -> None:
+def _add_upload_options(
+    parser: argparse.ArgumentParser,
+    *,
+    include_upload_flag: bool = False,
+    default_parse_metadata: bool = True,
+) -> None:
     if include_upload_flag:
         parser.add_argument("--upload", action="store_true", help="处理完成后直接上传到 Banana Music 后端")
     parser.add_argument("--base-url", default=os.getenv("BANANA_BASE_URL", "http://localhost:8000"), help="Banana Music 后端地址（默认 http://localhost:8000，或 BANANA_BASE_URL）")
@@ -1731,9 +1742,12 @@ def _add_upload_options(parser: argparse.ArgumentParser, *, include_upload_flag:
     parser.add_argument(
         "--parse-metadata",
         dest="parse_metadata",
-        default=True,
+        default=default_parse_metadata,
         action=argparse.BooleanOptionalAction,
-        help="是否在上传写库后入队服务端 parse_upload 元数据清洗（默认开启；批量导入已预处理时建议 --no-parse-metadata）",
+        help=(
+            "是否在上传写库后入队服务端 parse_upload 元数据清洗"
+            f"（默认{'开启' if default_parse_metadata else '关闭'}）"
+        ),
     )
     duplicate_group = parser.add_mutually_exclusive_group()
     duplicate_group.add_argument(
@@ -1921,6 +1935,8 @@ async def upload_audio_path_for_bulk(
     model: str,
     timeout: float,
     duplicate_mode: str,
+    parse_metadata: bool,
+    skip_llm: bool,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -1948,6 +1964,7 @@ async def upload_audio_path_for_bulk(
                 model=model,
                 timeout=timeout,
                 request_timeout=request_timeout,
+                skip_llm=skip_llm,
             ))
         elif duplicate_mode == "update" and duplicate.get("track_id"):
             duplicate.update(await update_duplicate_track_metadata(
@@ -1960,30 +1977,36 @@ async def upload_audio_path_for_bulk(
                 model=model,
                 timeout=timeout,
                 request_timeout=request_timeout,
+                skip_llm=skip_llm,
             ))
         return {"source_file": str(path), **duplicate}
 
-    llm, skipped = await clean_tags_in_place(
-        dst,
-        ollama_url=ollama_url,
-        model=model,
-        timeout=timeout,
-    )
-    if skipped:
-        return {"source_file": str(path), **skipped}
+    llm = None
+    if not skip_llm:
+        llm, skipped = await clean_tags_in_place(
+            dst,
+            ollama_url=ollama_url,
+            model=model,
+            timeout=timeout,
+        )
+        if skipped:
+            return {"source_file": str(path), **skipped}
 
     uploaded = await upload_file_to_backend(
         dst,
         base_url=base_url,
         api_key=api_key,
         token=token,
-        parse_metadata=False,
+        parse_metadata=False if llm is not None else parse_metadata,
         metadata=llm,
         poll_interval=poll_interval,
         job_timeout=job_timeout,
         request_timeout=request_timeout,
     )
-    return {"source_file": str(path), "llm_result": asdict(llm), **uploaded}
+    result: dict = {"source_file": str(path), **uploaded}
+    if llm is not None:
+        result["llm_result"] = asdict(llm)
+    return result
 
 
 async def import_playlist_to_backend(
@@ -1997,6 +2020,8 @@ async def import_playlist_to_backend(
     model: str,
     timeout: float,
     duplicate_mode: str,
+    parse_metadata: bool,
+    skip_llm: bool,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -2051,6 +2076,8 @@ async def import_playlist_to_backend(
                     model=model,
                     timeout=timeout,
                     duplicate_mode=duplicate_mode,
+                    parse_metadata=parse_metadata,
+                    skip_llm=skip_llm,
                     poll_interval=poll_interval,
                     job_timeout=job_timeout,
                     request_timeout=request_timeout,
@@ -2122,6 +2149,8 @@ async def _run_upload(args: argparse.Namespace) -> None:
                         model=args.model,
                         timeout=args.timeout,
                         duplicate_mode=duplicate_mode,
+                        parse_metadata=args.parse_metadata,
+                        skip_llm=args.skip_llm,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
@@ -2137,6 +2166,8 @@ async def _run_upload(args: argparse.Namespace) -> None:
                         model=args.model,
                         timeout=args.timeout,
                         duplicate_mode=duplicate_mode,
+                        parse_metadata=args.parse_metadata,
+                        skip_llm=args.skip_llm,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
@@ -2185,10 +2216,11 @@ async def _amain(argv: Optional[list[str]] = None) -> None:
     _add_common_options(p_process)
     p_process.set_defaults(func=_run_process)
 
-    p_upload = subparsers.add_parser("upload", help="先上传查重；非重复时 LLM 清洗后写入 Banana Music 后端")
+    p_upload = subparsers.add_parser("upload", help="先查重；非重复时默认客户端 LLM 清洗后写入 Banana Music 后端")
     p_upload.add_argument("files", nargs="+", metavar="FILE", help="输入文件路径")
+    p_upload.add_argument("--skip-llm", action="store_true", help="跳过 LLM 清洗，仅上传原始/转码后文件")
     _add_llm_options(p_upload)
-    _add_upload_options(p_upload)
+    _add_upload_options(p_upload, default_parse_metadata=False)
     _add_common_options(p_upload)
     p_upload.set_defaults(func=_run_upload)
 
