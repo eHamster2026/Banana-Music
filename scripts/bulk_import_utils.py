@@ -60,7 +60,25 @@ def _tag_values(audio, key: str) -> list[str]:
     return [text] if text else []
 
 
-def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None:
+def _clean_text(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _parse_track_number(value) -> int | None:
+    text = _clean_text(value)
+    if not text:
+        return None
+    try:
+        number = int(text.split("/", 1)[0])
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _ffprobe_tag_sets(path: Path, timeout: float) -> list[dict[str, object]] | None:
     try:
         result = subprocess.run(
             [
@@ -68,7 +86,7 @@ def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None
                 "-v",
                 "error",
                 "-show_entries",
-                "format_tags=title,artist:stream_tags=title,artist",
+                "format_tags:stream_tags",
                 "-of",
                 "json",
                 str(path),
@@ -82,22 +100,22 @@ def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None
         return None
     except subprocess.TimeoutExpired:
         logging.warning("[%s] 标签检查超时 %.1fs，跳过", path.name, timeout)
-        return False
+        return []
     except Exception as exc:
         logging.warning("[%s] ffprobe 标签检查失败，跳过: %s", path.name, exc)
-        return False
+        return []
 
     if result.returncode != 0:
         logging.warning("[%s] ffprobe 无法读取标签，跳过: %s", path.name, (result.stderr or "").strip())
-        return False
+        return []
 
     try:
         data = json.loads(result.stdout or "{}")
     except json.JSONDecodeError:
         logging.warning("[%s] ffprobe 标签输出不是 JSON，跳过", path.name)
-        return False
+        return []
 
-    tag_sets = []
+    tag_sets: list[dict[str, object]] = []
     format_tags = data.get("format", {}).get("tags")
     if isinstance(format_tags, dict):
         tag_sets.append(format_tags)
@@ -107,16 +125,29 @@ def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None
             tags = stream.get("tags") if isinstance(stream, dict) else None
             if isinstance(tags, dict):
                 tag_sets.append(tags)
+    return tag_sets
 
-    def has_key(name: str) -> bool:
-        name = name.casefold()
-        for tags in tag_sets:
-            for key, value in tags.items():
-                if str(key).casefold() == name and str(value).strip():
-                    return True
-        return False
 
-    return has_key("title") and has_key("artist")
+def _tag_value_from_sets(tag_sets: list[dict[str, object]], *names: str) -> str | None:
+    wanted = {name.casefold() for name in names}
+    for tags in tag_sets:
+        for key, value in tags.items():
+            if str(key).casefold() not in wanted:
+                continue
+            text = _clean_text(value)
+            if text:
+                return text
+    return None
+
+
+def _has_title_and_artist_via_ffprobe(path: Path, timeout: float) -> bool | None:
+    tag_sets = _ffprobe_tag_sets(path, timeout)
+    if tag_sets is None:
+        return None
+    return bool(
+        _tag_value_from_sets(tag_sets, "title")
+        and _tag_value_from_sets(tag_sets, "artist")
+    )
 
 
 def has_title_and_artist_tags(path: Path, *, timeout: float = 5.0) -> bool:
@@ -137,6 +168,72 @@ def has_title_and_artist_tags(path: Path, *, timeout: float = 5.0) -> bool:
         return False
 
     return bool(_tag_values(audio, "title") and _tag_values(audio, "artist"))
+
+
+def _metadata_via_ffprobe(path: Path, timeout: float) -> MetadataResult | None:
+    tag_sets = _ffprobe_tag_sets(path, timeout)
+    if tag_sets is None:
+        return None
+    if not tag_sets:
+        return MetadataResult()
+
+    title = _tag_value_from_sets(tag_sets, "title")
+    artist = _tag_value_from_sets(tag_sets, "artist")
+    album = _tag_value_from_sets(tag_sets, "album")
+    album_artist = _tag_value_from_sets(tag_sets, "album_artist", "albumartist", "album artist")
+    track_number = _parse_track_number(
+        _tag_value_from_sets(tag_sets, "track", "tracknumber", "track_number")
+    )
+
+    artists = [artist] if artist else []
+    album_artists = [album_artist] if album_artist else []
+    return MetadataResult(
+        title=title,
+        artists=artists,
+        album=album,
+        album_artist=album_artist,
+        album_artists=album_artists,
+        track_number=track_number,
+        confidence=1.0 if title and artists else 0.0,
+    )
+
+
+def read_embedded_metadata(path: Path, *, timeout: float = 5.0) -> MetadataResult | None:
+    """Read embedded tags for upload scripts, preferring ffprobe for speed and format coverage."""
+    ffprobe_result = _metadata_via_ffprobe(path, timeout)
+    if ffprobe_result is not None and ffprobe_result.title and ffprobe_result.artists:
+        return ffprobe_result
+
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:
+        if ffprobe_result is not None:
+            return ffprobe_result
+        logging.error("请安装 ffprobe 或 mutagen 后再读取本地标签")
+        return None
+
+    try:
+        audio = MutagenFile(str(path), easy=True)
+    except Exception as exc:
+        logging.warning("[%s] 标签读取失败，跳过: %s", path.name, exc)
+        return ffprobe_result
+    if audio is None:
+        return ffprobe_result or MetadataResult()
+
+    artists = _tag_values(audio, "artist")
+    album_artists = _tag_values(audio, "albumartist")
+    title_values = _tag_values(audio, "title")
+    album_values = _tag_values(audio, "album")
+    track_values = _tag_values(audio, "tracknumber")
+    return MetadataResult(
+        title=title_values[0] if title_values else None,
+        artists=artists,
+        album=album_values[0] if album_values else None,
+        album_artist=album_artists[0] if album_artists else None,
+        album_artists=album_artists,
+        track_number=_parse_track_number(track_values[0] if track_values else None),
+        confidence=1.0 if title_values and artists else 0.0,
+    )
 
 
 def add_auth_options(parser: argparse.ArgumentParser) -> None:

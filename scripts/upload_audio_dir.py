@@ -16,8 +16,8 @@ from pathlib import Path
 from bulk_import_utils import (
     _auth_headers,
     add_auth_options,
-    has_title_and_artist_tags,
     iter_audio_files,
+    read_embedded_metadata,
     resolve_upload_token,
     upload_file_with_client,
 )
@@ -40,23 +40,31 @@ async def upload_worker(
             index, path = item
             logging.info("[worker-%02d %d/%d] 检查标签: %s", worker_id, index, total, path)
             try:
-                has_required_tags = await asyncio.to_thread(
-                    has_title_and_artist_tags,
+                metadata = await asyncio.to_thread(
+                    read_embedded_metadata,
                     path,
                     timeout=args.metadata_check_timeout,
                 )
-                if not has_required_tags:
+                if not metadata or not metadata.title or not metadata.artists:
                     logging.warning("[%s] title 或 artist 为空，跳过", path)
                     results[index - 1] = {"file": str(path), "status": "skipped", "detail": "title_or_artist_missing"}
                     continue
 
-                logging.info("[worker-%02d %d/%d] 上传: %s", worker_id, index, total, path)
+                logging.info(
+                    "[worker-%02d %d/%d] 上传: %s title=%r artists=%r",
+                    worker_id,
+                    index,
+                    total,
+                    path,
+                    metadata.title,
+                    metadata.artists,
+                )
                 results[index - 1] = await upload_file_with_client(
                     client,
                     path,
                     base_url=args.base_url,
                     parse_metadata=False,
-                    metadata=None,
+                    metadata=metadata,
                     poll_interval=args.poll_interval,
                     job_timeout=args.job_timeout,
                 )
