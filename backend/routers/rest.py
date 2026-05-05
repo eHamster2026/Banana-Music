@@ -3,9 +3,9 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import FileResponse, RedirectResponse
-from sqlalchemy import func, or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.orm import Session, aliased, selectinload
 
 from config import settings
 from deps import get_current_user, get_db, get_optional_user
@@ -79,6 +79,27 @@ def _local_file_from_stream_url(stream_url: str | None) -> Path | None:
         return None
     name = stream_url.removeprefix("/resource/")
     return Path(__file__).parent.parent.parent / "data" / "resource" / name
+
+
+def _search_patterns(query: str) -> tuple[str, str, str]:
+    needle = query.strip().casefold()
+    return needle, f"{needle}%", f"%{needle}%"
+
+
+def _rank_text(column, *, exact: str, prefix: str, contains: str, base: int):
+    lowered = func.lower(column)
+    return (
+        (lowered == exact, base),
+        (lowered.like(prefix), base + 1),
+        (lowered.like(contains), base + 2),
+    )
+
+
+def _rank_case(*ranked_conditions, else_: int = 999):
+    whens = []
+    for conditions in ranked_conditions:
+        whens.extend(conditions)
+    return case(*whens, else_=else_)
 
 
 def _cover_file_from_path(cover_path: str | None) -> Path | None:
@@ -329,38 +350,112 @@ async def search3(
     db: Session = Depends(get_db),
     user: Optional[models.User] = Depends(get_optional_user),
 ):
-    like = f"%{query}%"
-    featured_track_ids = (
+    exact, prefix, contains = _search_patterns(query)
+    if not exact:
+        return schemas.SearchResult(tracks=[], albums=[], artists=[], playlists=[], plugin_hits=[])
+
+    track_featured_artist = aliased(models.Artist)
+    track_featured_exact = (
         db.query(models.TrackArtist.track_id)
-        .join(models.Artist, models.Artist.id == models.TrackArtist.artist_id)
-        .filter(models.Artist.name.ilike(like))
+        .join(track_featured_artist, track_featured_artist.id == models.TrackArtist.artist_id)
+        .filter(models.TrackArtist.track_id == models.Track.id, func.lower(track_featured_artist.name) == exact)
+        .exists()
     )
-    featured_album_ids = (
-        db.query(models.AlbumArtist.album_id)
-        .join(models.Artist, models.Artist.id == models.AlbumArtist.artist_id)
-        .filter(models.Artist.name.ilike(like))
+    track_featured_prefix = (
+        db.query(models.TrackArtist.track_id)
+        .join(track_featured_artist, track_featured_artist.id == models.TrackArtist.artist_id)
+        .filter(models.TrackArtist.track_id == models.Track.id, func.lower(track_featured_artist.name).like(prefix))
+        .exists()
+    )
+    track_featured_contains = (
+        db.query(models.TrackArtist.track_id)
+        .join(track_featured_artist, track_featured_artist.id == models.TrackArtist.artist_id)
+        .filter(models.TrackArtist.track_id == models.Track.id, func.lower(track_featured_artist.name).like(contains))
+        .exists()
+    )
+    track_rank = _rank_case(
+        _rank_text(models.Track.title, exact=exact, prefix=prefix, contains=contains, base=0),
+        _rank_text(models.Artist.name, exact=exact, prefix=prefix, contains=contains, base=10),
+        (
+            (track_featured_exact, 20),
+            (track_featured_prefix, 21),
+            (track_featured_contains, 22),
+        ),
+        _rank_text(models.Album.title, exact=exact, prefix=prefix, contains=contains, base=30),
     )
 
     tracks = (
         db.query(models.Track)
         .options(*track_out_load_options())
-        .filter(or_(models.Track.title.ilike(like), models.Track.id.in_(featured_track_ids)))
+        .join(models.Artist, models.Artist.id == models.Track.artist_id)
+        .outerjoin(models.Album, models.Album.id == models.Track.album_id)
+        .filter(or_(
+            func.lower(models.Track.title).like(contains),
+            func.lower(models.Artist.name).like(contains),
+            track_featured_contains,
+            func.lower(models.Album.title).like(contains),
+        ))
+        .order_by(track_rank, models.Track.created_at.desc().nullslast(), models.Track.id.desc())
         .limit(10)
         .all()
     )
+
+    album_featured_artist = aliased(models.Artist)
+    album_featured_exact = (
+        db.query(models.AlbumArtist.album_id)
+        .join(album_featured_artist, album_featured_artist.id == models.AlbumArtist.artist_id)
+        .filter(models.AlbumArtist.album_id == models.Album.id, func.lower(album_featured_artist.name) == exact)
+        .exists()
+    )
+    album_featured_prefix = (
+        db.query(models.AlbumArtist.album_id)
+        .join(album_featured_artist, album_featured_artist.id == models.AlbumArtist.artist_id)
+        .filter(models.AlbumArtist.album_id == models.Album.id, func.lower(album_featured_artist.name).like(prefix))
+        .exists()
+    )
+    album_featured_contains = (
+        db.query(models.AlbumArtist.album_id)
+        .join(album_featured_artist, album_featured_artist.id == models.AlbumArtist.artist_id)
+        .filter(models.AlbumArtist.album_id == models.Album.id, func.lower(album_featured_artist.name).like(contains))
+        .exists()
+    )
+    album_rank = _rank_case(
+        _rank_text(models.Album.title, exact=exact, prefix=prefix, contains=contains, base=0),
+        _rank_text(models.Artist.name, exact=exact, prefix=prefix, contains=contains, base=10),
+        (
+            (album_featured_exact, 20),
+            (album_featured_prefix, 21),
+            (album_featured_contains, 22),
+        ),
+    )
     albums = (
         db.query(models.Album)
-        .filter(or_(models.Album.title.ilike(like), models.Album.id.in_(featured_album_ids)))
+        .join(models.Artist, models.Artist.id == models.Album.artist_id)
+        .filter(or_(
+            func.lower(models.Album.title).like(contains),
+            func.lower(models.Artist.name).like(contains),
+            album_featured_contains,
+        ))
+        .order_by(album_rank, models.Album.created_at.desc().nullslast(), models.Album.id.desc())
         .limit(8)
         .all()
     )
+    artist_rank = _rank_case(_rank_text(models.Artist.name, exact=exact, prefix=prefix, contains=contains, base=0))
     artists = (
         db.query(models.Artist)
-        .filter(models.Artist.name.ilike(like), models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
+        .filter(func.lower(models.Artist.name).like(contains), models.Artist.name.notin_(UNKNOWN_ARTIST_NAMES))
+        .order_by(artist_rank, models.Artist.id.desc())
         .limit(6)
         .all()
     )
-    playlists = db.query(models.Playlist).filter(models.Playlist.name.ilike(like)).limit(6).all()
+    playlist_rank = _rank_case(_rank_text(models.Playlist.name, exact=exact, prefix=prefix, contains=contains, base=0))
+    playlists = (
+        db.query(models.Playlist)
+        .filter(func.lower(models.Playlist.name).like(contains))
+        .order_by(playlist_rank, models.Playlist.created_at.desc().nullslast(), models.Playlist.id.desc())
+        .limit(6)
+        .all()
+    )
 
     plugin_hits: list[schemas.PluginSearchHitOut] = []
     if user is not None and not settings.banana_testing:
