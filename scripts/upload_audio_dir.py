@@ -16,6 +16,7 @@ from pathlib import Path
 from bulk_import_utils import (
     _auth_headers,
     add_auth_options,
+    has_title_and_artist_tags,
     iter_audio_files,
     resolve_upload_token,
     upload_file_with_client,
@@ -65,6 +66,18 @@ async def run(args: argparse.Namespace) -> None:
     if not paths:
         logging.error("目录下没有支持的音频文件: %s", root)
         sys.exit(1)
+    upload_paths: list[Path] = []
+    skipped_metadata = 0
+    for path in paths:
+        if has_title_and_artist_tags(path):
+            upload_paths.append(path)
+        else:
+            skipped_metadata += 1
+            logging.warning("[%s] title 或 artist 为空，跳过", path)
+    if not upload_paths:
+        logging.error("没有 title 和 artist 都完整的音频文件: %s", root)
+        sys.exit(1)
+    paths = upload_paths
 
     token = await resolve_upload_token(args)
     headers = _auth_headers(args.api_key, token)
@@ -80,8 +93,9 @@ async def run(args: argparse.Namespace) -> None:
     concurrency = max(1, args.concurrency)
     max_connections = args.max_connections or max(concurrency * 2, concurrency)
     logging.info(
-        "压测上传启动：files=%d concurrency=%d max_connections=%d poll_interval=%.2fs",
+        "压测上传启动：files=%d skipped_metadata=%d concurrency=%d max_connections=%d poll_interval=%.2fs",
         len(paths),
+        skipped_metadata,
         concurrency,
         max_connections,
         args.poll_interval,
@@ -116,7 +130,7 @@ async def run(args: argparse.Namespace) -> None:
     added = sum(1 for item in compact_results if item.get("status") == "added")
     duplicate = sum(1 for item in compact_results if item.get("status") == "duplicate")
     failed = sum(1 for item in compact_results if item.get("status") == "error")
-    logging.info("完成：新增 %d  重复 %d  失败 %d", added, duplicate, failed)
+    logging.info("完成：新增 %d  重复 %d  跳过元数据不完整 %d  失败 %d", added, duplicate, skipped_metadata, failed)
 
 
 def main() -> None:

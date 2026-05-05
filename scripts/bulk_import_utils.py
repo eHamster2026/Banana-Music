@@ -43,6 +43,37 @@ def iter_audio_files(root: Path, *, recursive: bool) -> list[Path]:
     )
 
 
+def _tag_values(audio, key: str) -> list[str]:
+    if audio is None or not hasattr(audio, "get"):
+        return []
+    try:
+        value = audio.get(key)
+    except Exception:
+        return []
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple)):
+        return [str(item).strip() for item in value if str(item).strip()]
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def has_title_and_artist_tags(path: Path) -> bool:
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:
+        logging.error("请安装 mutagen: pip install mutagen")
+        return False
+
+    try:
+        audio = MutagenFile(str(path), easy=True)
+    except Exception as exc:
+        logging.warning("[%s] 标签读取失败，跳过: %s", path.name, exc)
+        return False
+
+    return bool(_tag_values(audio, "title") and _tag_values(audio, "artist"))
+
+
 def add_auth_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", default=os.getenv("BANANA_BASE_URL", "http://localhost:8000"), help="Banana Music 后端地址")
     parser.add_argument("--api-key", default=os.getenv("BANANA_API_KEY"), help="API Key（可用 BANANA_API_KEY）")
