@@ -80,6 +80,10 @@ def _is_same_path(a: Path, b: Path) -> bool:
         return a.absolute() == b.absolute()
 
 
+def _is_blank_text(value: object) -> bool:
+    return not isinstance(value, str) or not value.strip()
+
+
 def _output_path_for(src: Path, output_dir: Path, suffix: str) -> Path:
     dst = output_dir / f"{src.stem}{suffix}"
     if _is_same_path(dst, src):
@@ -888,6 +892,73 @@ def _metadata_patch_payload(metadata: MetadataResult) -> dict:
     return payload
 
 
+def _extract_existing_track_identity(track: dict) -> tuple[str | None, str | None]:
+    artist_name = None
+    album_title = None
+
+    artist = track.get("artist")
+    if isinstance(artist, dict):
+        value = artist.get("name")
+        if isinstance(value, str) and value.strip():
+            artist_name = value.strip()
+
+    album = track.get("album")
+    if isinstance(album, dict):
+        value = album.get("title")
+        if isinstance(value, str) and value.strip():
+            album_title = value.strip()
+
+    return artist_name, album_title
+
+
+def _metadata_patch_payload_for_update(existing_track: dict, metadata: MetadataResult) -> dict:
+    patch = _metadata_patch_payload(metadata)
+    if not patch:
+        return {}
+
+    result: dict = {}
+    existing_artist_name, existing_album_title = _extract_existing_track_identity(existing_track)
+
+    if "title" in patch and _is_blank_text(existing_track.get("title")):
+        result["title"] = patch["title"]
+
+    if "artist_name" in patch and (not existing_artist_name or existing_artist_name == "未知艺人"):
+        result["artist_name"] = patch["artist_name"]
+
+    if "album_title" in patch and not existing_album_title:
+        result["album_title"] = patch["album_title"]
+
+    if "track_number" in patch and not existing_track.get("track_number"):
+        result["track_number"] = patch["track_number"]
+
+    return result
+
+
+async def fetch_track_for_update(
+    track_id: int,
+    *,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    request_timeout: float,
+) -> dict | None:
+    try:
+        import httpx
+    except ImportError:
+        logging.error("请安装 httpx: pip install httpx")
+        return None
+
+    base_url = base_url.rstrip("/")
+    headers = _auth_headers(api_key, token)
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        r = await client.get(f"{base_url}/rest/getSong", params={"id": track_id})
+        if r.status_code == 404:
+            logging.warning("[%s] 目标曲目不存在: %s", track_id, track_id)
+            return None
+        r.raise_for_status()
+        return r.json()
+
+
 async def overwrite_duplicate_track_metadata(
     track_id: int,
     path: Path,
@@ -925,6 +996,55 @@ async def overwrite_duplicate_track_metadata(
 
     logging.info("[%s] 已覆盖重复曲目元数据 track_id=%s fields=%s", path.name, track_id, sorted(payload))
     return {"overwritten": True, "overwrite_fields": sorted(payload), "overwrite_metadata": asdict(metadata)}
+
+
+async def update_duplicate_track_metadata(
+    track_id: int,
+    path: Path,
+    *,
+    base_url: str,
+    api_key: Optional[str],
+    token: Optional[str],
+    ollama_url: str,
+    model: str,
+    timeout: float,
+    request_timeout: float,
+) -> dict:
+    try:
+        import httpx
+    except ImportError:
+        return {"updated": False, "update_error": "missing httpx"}
+
+    metadata = await clean_metadata_for_duplicate(
+        path,
+        ollama_url=ollama_url,
+        model=model,
+        timeout=timeout,
+    )
+    if metadata is None:
+        return {"updated": False, "update_error": "无可用本地元数据"}
+
+    existing_track = await fetch_track_for_update(
+        track_id,
+        base_url=base_url,
+        api_key=api_key,
+        token=token,
+        request_timeout=request_timeout,
+    )
+    if not isinstance(existing_track, dict):
+        return {"updated": False, "update_error": "无法读取目标曲目"}
+
+    payload = _metadata_patch_payload_for_update(existing_track, metadata)
+    if not payload:
+        return {"updated": False, "update_error": "服务端元数据已完整"}
+
+    headers = _auth_headers(api_key, token)
+    async with httpx.AsyncClient(timeout=request_timeout, headers=headers) as client:
+        r = await client.put(f"{base_url.rstrip('/')}/rest/x-banana/admin/tracks/{track_id}", json=payload)
+        r.raise_for_status()
+
+    logging.info("[%s] 已补充重复曲目元数据 track_id=%s fields=%s", path.name, track_id, sorted(payload))
+    return {"updated": True, "updated_fields": sorted(payload), "update_metadata": asdict(metadata)}
 
 
 async def _llm_clean(
@@ -1615,10 +1735,21 @@ def _add_upload_options(parser: argparse.ArgumentParser, *, include_upload_flag:
         action=argparse.BooleanOptionalAction,
         help="是否在上传写库后入队服务端 parse_upload 元数据清洗（默认开启；批量导入已预处理时建议 --no-parse-metadata）",
     )
-    parser.add_argument(
+    duplicate_group = parser.add_mutually_exclusive_group()
+    duplicate_group.add_argument(
         "--overwrite-duplicates",
         action="store_true",
-        help="遇到重复内容时不重新上传音频，而是用本地元数据覆盖服务器已有曲目（默认关闭；需要管理员权限）",
+        help="遇到重复内容时不重新上传音频，而是覆盖服务器已有曲目（默认关闭；需要管理员权限）",
+    )
+    duplicate_group.add_argument(
+        "--pass-duplicates",
+        action="store_true",
+        help="遇到重复内容时跳过（默认）",
+    )
+    duplicate_group.add_argument(
+        "--update-duplicates",
+        action="store_true",
+        help="遇到重复内容时不重新上传音频，而是仅补充服务器缺失元数据（默认关闭；需要管理员权限）",
     )
     parser.add_argument("--poll-interval", default=0.8, type=float, help="上传任务轮询间隔秒数（默认 0.8）")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数（默认 120）")
@@ -1683,6 +1814,13 @@ async def _run_process(args: argparse.Namespace) -> None:
 
     try:
         upload_token = await resolve_upload_token(args) if args.upload else args.token
+        duplicate_mode = "pass"
+        if args.overwrite_duplicates:
+            duplicate_mode = "overwrite"
+        elif args.update_duplicates:
+            duplicate_mode = "update"
+        elif args.pass_duplicates:
+            duplicate_mode = "pass"
         for path in _expand_paths(args.files, SUPPORTED_EXTS):
             logging.info("─── 处理: %s", path)
             result = await process_file(
@@ -1708,8 +1846,20 @@ async def _run_process(args: argparse.Namespace) -> None:
                         request_timeout=args.request_timeout,
                     )
                     if duplicate:
-                        if args.overwrite_duplicates and duplicate.get("track_id"):
+                        if duplicate_mode == "overwrite" and duplicate.get("track_id"):
                             duplicate.update(await overwrite_duplicate_track_metadata(
+                                int(duplicate["track_id"]),
+                                final_path,
+                                base_url=args.base_url,
+                                api_key=args.api_key,
+                                token=upload_token,
+                                ollama_url=args.ollama_url.rstrip("/"),
+                                model=args.model,
+                                timeout=args.timeout,
+                                request_timeout=args.request_timeout,
+                            ))
+                        elif duplicate_mode == "update" and duplicate.get("track_id"):
+                            duplicate.update(await update_duplicate_track_metadata(
                                 int(duplicate["track_id"]),
                                 final_path,
                                 base_url=args.base_url,
@@ -1770,7 +1920,7 @@ async def upload_audio_path_for_bulk(
     ollama_url: str,
     model: str,
     timeout: float,
-    overwrite_duplicates: bool,
+    duplicate_mode: str,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -1787,8 +1937,20 @@ async def upload_audio_path_for_bulk(
         request_timeout=request_timeout,
     )
     if duplicate:
-        if overwrite_duplicates and duplicate.get("track_id"):
+        if duplicate_mode == "overwrite" and duplicate.get("track_id"):
             duplicate.update(await overwrite_duplicate_track_metadata(
+                int(duplicate["track_id"]),
+                dst,
+                base_url=base_url,
+                api_key=api_key,
+                token=token,
+                ollama_url=ollama_url,
+                model=model,
+                timeout=timeout,
+                request_timeout=request_timeout,
+            ))
+        elif duplicate_mode == "update" and duplicate.get("track_id"):
+            duplicate.update(await update_duplicate_track_metadata(
                 int(duplicate["track_id"]),
                 dst,
                 base_url=base_url,
@@ -1834,7 +1996,7 @@ async def import_playlist_to_backend(
     ollama_url: str,
     model: str,
     timeout: float,
-    overwrite_duplicates: bool,
+    duplicate_mode: str,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -1888,7 +2050,7 @@ async def import_playlist_to_backend(
                     ollama_url=ollama_url,
                     model=model,
                     timeout=timeout,
-                    overwrite_duplicates=overwrite_duplicates,
+                    duplicate_mode=duplicate_mode,
                     poll_interval=poll_interval,
                     job_timeout=job_timeout,
                     request_timeout=request_timeout,
@@ -1938,6 +2100,13 @@ async def import_playlist_to_backend(
 async def _run_upload(args: argparse.Namespace) -> None:
     results: list[dict] = []
     upload_token = await resolve_upload_token(args)
+    duplicate_mode = "pass"
+    if args.overwrite_duplicates:
+        duplicate_mode = "overwrite"
+    elif args.update_duplicates:
+        duplicate_mode = "update"
+    elif args.pass_duplicates:
+        duplicate_mode = "pass"
     with tempfile.TemporaryDirectory(prefix="banana-bulk-upload-") as tmp:
         tmp_dir = Path(tmp)
         for path in _expand_paths(args.files, SUPPORTED_EXTS | PLAYLIST_EXTS):
@@ -1952,7 +2121,7 @@ async def _run_upload(args: argparse.Namespace) -> None:
                         ollama_url=args.ollama_url.rstrip("/"),
                         model=args.model,
                         timeout=args.timeout,
-                        overwrite_duplicates=args.overwrite_duplicates,
+                        duplicate_mode=duplicate_mode,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
@@ -1967,7 +2136,7 @@ async def _run_upload(args: argparse.Namespace) -> None:
                         ollama_url=args.ollama_url.rstrip("/"),
                         model=args.model,
                         timeout=args.timeout,
-                        overwrite_duplicates=args.overwrite_duplicates,
+                        duplicate_mode=duplicate_mode,
                         poll_interval=args.poll_interval,
                         job_timeout=args.job_timeout,
                         request_timeout=args.request_timeout,
