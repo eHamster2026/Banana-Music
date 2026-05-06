@@ -322,6 +322,8 @@
     "colArtist": "Artist",
     "colAlbum": "Album",
     "colDuration": "Duration",
+    "colFormat": "Format",
+    "colBitrate": "Bitrate",
     "colFile": "File",
     "colActions": "Actions",
     "playTrack": "Play",

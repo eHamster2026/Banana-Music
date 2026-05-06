@@ -5,6 +5,7 @@ routers/admin.py
 """
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote, urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
@@ -20,6 +21,62 @@ from services.track_metadata_update import update_track_with_metadata_patch
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
 RESOURCE_DIR = Path(__file__).parent.parent.parent / "data" / "resource"
+
+
+def _resource_path_from_stream_url(stream_url: str | None) -> Path | None:
+    if not stream_url:
+        return None
+    path = unquote(urlparse(stream_url).path or stream_url)
+    if not path.startswith("/resource/"):
+        return None
+    return RESOURCE_DIR / path.removeprefix("/resource/")
+
+
+def _audio_format_from_stream_url(stream_url: str | None) -> str | None:
+    path = _resource_path_from_stream_url(stream_url)
+    suffix = path.suffix if path else Path(unquote(urlparse(stream_url or "").path)).suffix
+    return suffix.lstrip(".").upper() or None
+
+
+def _bitrate_kbps(track: models.Track) -> int | None:
+    path = _resource_path_from_stream_url(track.stream_url)
+    if not path or not path.exists():
+        return None
+    try:
+        from mutagen import File as MutagenFile
+
+        audio = MutagenFile(str(path))
+        bitrate = getattr(getattr(audio, "info", None), "bitrate", None)
+        if bitrate:
+            return max(1, round(float(bitrate) / 1000))
+    except Exception:
+        pass
+
+    duration = track.duration_sec or 0
+    if duration <= 0:
+        return None
+    try:
+        return max(1, round(path.stat().st_size * 8 / duration / 1000))
+    except OSError:
+        return None
+
+
+def _track_admin_out(track: models.Track) -> dict:
+    return {
+        "id": track.id,
+        "title": track.title,
+        "artist": track.artist,
+        "album": track.album,
+        "duration_sec": track.duration_sec,
+        "track_number": track.track_number,
+        "lyrics": track.lyrics,
+        "cover_url": track.cover_url,
+        "stream_url": track.stream_url,
+        "audio_format": _audio_format_from_stream_url(track.stream_url),
+        "bitrate_kbps": _bitrate_kbps(track),
+        "created_at": track.created_at,
+        "ext": track.ext or {},
+    }
 
 
 # ── 曲目管理 ──────────────────────────────────────────────────
@@ -70,7 +127,7 @@ def list_tracks(
     total = query.count()
     items = query.order_by(models.Track.id.desc()).offset(skip).limit(limit).all()
     mark_track_likes(db, items, admin)
-    return {"total": total, "items": items}
+    return {"total": total, "items": [_track_admin_out(track) for track in items]}
 
 
 @router.post("/tracks/batch-update", response_model=schemas.BatchUpdateOut)
@@ -130,7 +187,7 @@ def update_track(
 
     db.commit()
     db.refresh(track)
-    return track
+    return _track_admin_out(track)
 
 
 @router.delete("/tracks/{track_id}/file", response_model=dict)

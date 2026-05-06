@@ -122,6 +122,8 @@ class TrackAdminOut(BaseModel):
     lyrics: Optional[str] = None
     cover_url: Optional[str] = None
     stream_url: Optional[str] = None
+    audio_format: Optional[str] = None
+    bitrate_kbps: Optional[int] = None
     created_at: Optional[int] = None
     ext: dict[str, Any] = Field(default_factory=dict)
     model_config = {"from_attributes": True}
@@ -291,7 +293,7 @@ class HistoryItem(BaseModel):
 # ── Pagination ────────────────────────────────────────
 class PaginatedTracks(BaseModel):
     total: int
-    items: List[TrackOut]
+    items: List[TrackAdminOut]
 
 
 # ── Admin: Batch Update ───────────────────────────────

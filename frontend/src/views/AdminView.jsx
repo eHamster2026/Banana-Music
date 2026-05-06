@@ -30,6 +30,16 @@ function Confirm({ msg, onOk, onCancel }) {
   )
 }
 
+function formatAudioFormat(track) {
+  const value = track?.audio_format || ''
+  return value ? String(value).toUpperCase() : '—'
+}
+
+function formatBitrate(track) {
+  const value = Number(track?.bitrate_kbps)
+  return Number.isFinite(value) && value > 0 ? `${Math.round(value)} kbps` : '—'
+}
+
 // ── 曲目编辑行内表单 ──────────────────────────────────────────
 function TrackEditForm({ track, token, onSave, onCancel, onDeleteTrack }) {
   const { t } = useTranslation()
@@ -260,6 +270,8 @@ function TracksTab({ token }) {
     { label: t('admin.colArtist'), width: 180 },
     { label: t('admin.colAlbum'), width: 200 },
     { label: t('admin.colDuration'), width: 86 },
+    { label: t('admin.colFormat'), width: 76 },
+    { label: t('admin.colBitrate'), width: 92 },
     { label: t('admin.colFile'), width: 88 },
     { label: t('admin.colActions'), width: 100 },
   ]
@@ -296,7 +308,7 @@ function TracksTab({ token }) {
       </div>
 
       <div className="admin-table-wrap">
-        <table style={{ width: '100%', minWidth: 990, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
+        <table style={{ width: '100%', minWidth: 1160, tableLayout: 'fixed', borderCollapse: 'collapse', fontSize: 13 }}>
           <colgroup>
             {trackHeaders.map((h, idx) => (
               <col key={`${h.label}-${idx}`} style={{ width: h.width }} />
@@ -314,6 +326,8 @@ function TracksTab({ token }) {
               const artistText = formatTrackArtists(track) || '—'
               const albumText = track.album?.title || '—'
               const titleText = displayTrackTitle(track)
+              const formatText = formatAudioFormat(track)
+              const bitrateText = formatBitrate(track)
               return (
               <React.Fragment key={track.id}>
                 <tr style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.1s' }}
@@ -353,6 +367,8 @@ function TracksTab({ token }) {
                     {albumText}
                   </td>
                   <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{fmtTime(track.duration_sec)}</td>
+                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{formatText}</td>
+                  <td style={{ padding: '10px 10px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{bitrateText}</td>
                   <td style={{ padding: '10px 10px', overflow: 'hidden' }}>
                     <span style={{
                       fontSize: 11, padding: '2px 8px', borderRadius: 10,
@@ -373,7 +389,7 @@ function TracksTab({ token }) {
                 </tr>
                 {editingId === track.id && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '0 10px 8px' }}>
+                    <td colSpan={10} style={{ padding: '0 10px 8px' }}>
                       <TrackEditForm
                         track={track}
                         token={token}
@@ -396,6 +412,8 @@ function TracksTab({ token }) {
           const artistText = formatTrackArtists(track) || '—'
           const albumText = track.album?.title || '—'
           const titleText = displayTrackTitle(track)
+          const formatText = formatAudioFormat(track)
+          const bitrateText = formatBitrate(track)
           return (
             <div className="admin-mobile-card" key={track.id}>
               <div className="admin-mobile-card-main">
@@ -422,6 +440,8 @@ function TracksTab({ token }) {
                 <span>#{track.id}</span>
                 <span>{albumText}</span>
                 <span>{fmtTime(track.duration_sec)}</span>
+                <span>{formatText}</span>
+                <span>{bitrateText}</span>
                 <span className={track.stream_url ? 'ok' : 'danger'}>
                   {track.stream_url ? t('admin.hasFile') : t('admin.noFile')}
                 </span>

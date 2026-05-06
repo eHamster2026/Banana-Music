@@ -322,6 +322,8 @@
     "colArtist": "艺人",
     "colAlbum": "专辑",
     "colDuration": "时长",
+    "colFormat": "格式",
+    "colBitrate": "码率",
     "colFile": "文件",
     "colActions": "操作",
     "playTrack": "播放",

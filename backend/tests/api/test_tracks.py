@@ -81,6 +81,49 @@ async def test_get_songs_marks_liked_tracks_for_current_user(client):
 
 
 @pytest.mark.asyncio
+async def test_admin_tracks_include_audio_format_and_bitrate(client, monkeypatch, tmp_path):
+    import soundfile as sf
+    from routers import admin
+
+    audio_path = tmp_path / "admin-probe.flac"
+    sf.write(audio_path, [0.0] * 8000, 8000, format="FLAC")
+    monkeypatch.setattr(admin, "RESOURCE_DIR", tmp_path)
+
+    db = SessionLocal()
+    try:
+        admin_user = models.User(
+            username="track-admin",
+            email="track-admin@example.com",
+            hashed_password="x",
+            is_admin=True,
+        )
+        artist = models.Artist(name="Admin Artist", art_color="art-1")
+        db.add_all([admin_user, artist])
+        db.flush()
+        db.add(models.Track(
+            title="Admin Probe",
+            artist_id=artist.id,
+            duration_sec=1,
+            stream_url="/resource/admin-probe.flac",
+            is_local=True,
+            audio_hash=b"admin-probe".ljust(16, b"-"),
+        ))
+        db.commit()
+        token = create_access_token({"sub": str(admin_user.id)})
+    finally:
+        db.close()
+
+    response = await client.get(
+        "/rest/x-banana/admin/tracks",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["audio_format"] == "FLAC"
+    assert item["bitrate_kbps"] > 0
+
+
+@pytest.mark.asyncio
 async def test_search_marks_liked_tracks_for_current_user(client):
     db = SessionLocal()
     try:
