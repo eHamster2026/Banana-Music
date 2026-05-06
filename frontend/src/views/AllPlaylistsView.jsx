@@ -5,6 +5,7 @@ import { useAuth } from '../contexts/AuthContext'
 import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
 import PlaylistCard from '../components/shared/PlaylistCard'
+import OverflowText from '../components/shared/OverflowText'
 import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function AllPlaylistsView() {
@@ -75,7 +76,7 @@ export default function AllPlaylistsView() {
             {userPlaylists.map(pl => (
               <div key={pl.id} className="pl-card">
                 <div className={`pl-card-art ${pl.art_color || 'art-1'}`} />
-                <div className="pl-card-name">{pl.name}</div>
+                <OverflowText className="pl-card-name">{pl.name}</OverflowText>
                 <div className="pl-card-meta">{t('common.trackCount', { count: pl.track_count })}</div>
               </div>
             ))}

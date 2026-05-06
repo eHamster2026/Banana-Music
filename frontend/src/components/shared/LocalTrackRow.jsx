@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { usePlayer } from '../../contexts/PlayerContext'
 import { useToast } from '../../contexts/ToastContext'
 import CoverArt from './CoverArt'
+import OverflowText from './OverflowText'
 
 function getTrackColor(track) {
   return track?.album?.art_color || track?.artist?.art_color || track?.art_color || 'art-1'
@@ -56,10 +57,10 @@ export default function LocalTrackRow({ track, num, contextIdx, isPlaying, onPla
           className="local-track-cover"
           alt={`${titleShown} ${t('player.coverAlt')}`}
         />
-        <div className="local-title">{titleShown}</div>
+        <OverflowText className="local-title">{titleShown}</OverflowText>
       </div>
-      <div className="local-cell">{artistName}</div>
-      <div className="local-cell">{albumTitle}</div>
+      <OverflowText className="local-cell">{artistName}</OverflowText>
+      <OverflowText className="local-cell">{albumTitle}</OverflowText>
       <div className="local-cell" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{fmtTime(duration)}</div>
       <button
         className="track-like-btn"

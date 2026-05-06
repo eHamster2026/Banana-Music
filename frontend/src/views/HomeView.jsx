@@ -6,6 +6,7 @@ import { useModal } from '../contexts/ModalContext'
 import { apiFetch } from '../api.js'
 import AlbumCard from '../components/shared/AlbumCard'
 import ArtistCard from '../components/shared/ArtistCard'
+import OverflowText from '../components/shared/OverflowText'
 import usePageRefresh from '../hooks/usePageRefresh'
 
 export default function HomeView() {
@@ -97,7 +98,7 @@ export default function HomeView() {
                 onClick={() => navigate('playlist', { id: pl.id }, pl.name)}
               >
                 <div className={`pl-card-art ${pl.art_color || 'art-1'}`} />
-                <div className="pl-card-name">{pl.name}</div>
+                <OverflowText className="pl-card-name">{pl.name}</OverflowText>
                 <div className="pl-card-meta">{t('common.trackCount', { count: pl.track_count })}</div>
               </div>
             ))}

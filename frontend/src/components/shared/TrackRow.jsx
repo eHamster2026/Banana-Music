@@ -6,6 +6,7 @@ import { useAuth } from '../../contexts/AuthContext'
 import { usePlayer } from '../../contexts/PlayerContext'
 import { useToast } from '../../contexts/ToastContext'
 import CoverArt from './CoverArt'
+import OverflowText from './OverflowText'
 
 function getTrackColor(track) {
   return track?.album?.art_color || track?.artist?.art_color || track?.art_color || 'art-1'
@@ -46,8 +47,8 @@ export default function TrackRow({ track, num, contextIdx, isPlaying, onPlay, on
           alt={`${titleShown} ${t('player.coverAlt')}`}
         />
         <div className="track-text">
-          <div className="track-title">{titleShown}</div>
-          <div className="track-artist-small">{formatTrackArtists(track)}</div>
+          <OverflowText className="track-title">{titleShown}</OverflowText>
+          <OverflowText className="track-artist-small">{formatTrackArtists(track)}</OverflowText>
         </div>
       </div>
       <div className="track-dur">{fmtTime(track.duration_sec ?? track.duration)}</div>

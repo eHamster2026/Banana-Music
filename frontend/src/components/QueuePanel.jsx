@@ -4,6 +4,7 @@ import { usePlayer } from '../contexts/PlayerContext'
 import { onQueueToggle } from './Player.jsx'
 import { formatTrackArtists, displayTrackTitle } from '../api.js'
 import CoverArt from './shared/CoverArt'
+import OverflowText from './shared/OverflowText'
 
 export default function QueuePanel() {
   const { t } = useTranslation()
@@ -86,8 +87,8 @@ export default function QueuePanel() {
               />
 
               <div className="queue-panel-info">
-                <div className="queue-panel-title">{titleShown}</div>
-                <div className="queue-panel-meta">{trackArtist(track)}</div>
+                <OverflowText className="queue-panel-title">{titleShown}</OverflowText>
+                <OverflowText className="queue-panel-meta">{trackArtist(track)}</OverflowText>
               </div>
             </div>
           )

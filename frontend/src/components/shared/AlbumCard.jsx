@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useNav } from '../../contexts/NavContext'
 import { formatAlbumArtists } from '../../api.js'
 import CoverArt from './CoverArt'
+import OverflowText from './OverflowText'
 
 export default function AlbumCard({ album, onClick }) {
   const { t } = useTranslation()
@@ -28,8 +29,8 @@ export default function AlbumCard({ album, onClick }) {
           </svg>
         </div>
       </div>
-      <div className="album-name">{album.title}</div>
-      <div className="album-artist">{formatAlbumArtists(album)}</div>
+      <OverflowText className="album-name">{album.title}</OverflowText>
+      <OverflowText className="album-artist">{formatAlbumArtists(album)}</OverflowText>
     </div>
   )
 }

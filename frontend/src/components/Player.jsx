@@ -7,6 +7,7 @@ import { useModal } from '../contexts/ModalContext'
 import { useToast } from '../contexts/ToastContext'
 import { apiFetch, fmtTime, formatTrackArtists, displayTrackTitle } from '../api.js'
 import CoverArt from './shared/CoverArt'
+import OverflowText from './shared/OverflowText'
 
 // Simple pub/sub for queue panel toggle
 const queueListeners = new Set()
@@ -147,8 +148,8 @@ export default function Player() {
           alt={currentTrack ? `${displayTrackTitle(currentTrack)} ${t('player.coverAlt')}` : t('player.coverAlt')}
         />
         <div className="player-track-info">
-          <div className="player-track-name">{currentTrack ? displayTrackTitle(currentTrack) : t('player.pickTrack')}</div>
-          <div className="player-track-artist">{currentArtist}</div>
+          <OverflowText className="player-track-name">{currentTrack ? displayTrackTitle(currentTrack) : t('player.pickTrack')}</OverflowText>
+          <OverflowText className="player-track-artist">{currentArtist}</OverflowText>
         </div>
         <button
           className={`player-heart${isLiked ? ' active' : ''}`}

@@ -426,8 +426,8 @@ function TracksTab({ token }) {
                   {currentTrackId === track.id ? '♫' : '▶'}
                 </button>
                 <div className="admin-mobile-card-text">
-                  <div className="admin-mobile-title">{titleText}</div>
-                  <div className="admin-mobile-sub">{artistText}</div>
+                  <div className="admin-mobile-title" title={titleText}>{titleText}</div>
+                  <div className="admin-mobile-sub" title={artistText}>{artistText}</div>
                 </div>
                 <button
                   className="admin-mobile-action"
@@ -438,7 +438,7 @@ function TracksTab({ token }) {
               </div>
               <div className="admin-mobile-meta">
                 <span>#{track.id}</span>
-                <span>{albumText}</span>
+                <span title={albumText}>{albumText}</span>
                 <span>{fmtTime(track.duration_sec)}</span>
                 <span>{formatText}</span>
                 <span>{bitrateText}</span>

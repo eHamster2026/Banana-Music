@@ -1,6 +1,7 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../../contexts/NavContext'
+import OverflowText from './OverflowText'
 
 export default function PlaylistCard({ playlist, onClick }) {
   const { t } = useTranslation()
@@ -15,7 +16,7 @@ export default function PlaylistCard({ playlist, onClick }) {
     <div className="playlist-card" onClick={handleClick}>
       <div className={`playlist-art ${playlist.art_color || 'art-1'}`} />
       <div style={{ minWidth: 0 }}>
-        <div className="playlist-name">{playlist.name}</div>
+        <OverflowText className="playlist-name">{playlist.name}</OverflowText>
         <div className="playlist-meta">
           {playlist.track_count != null ? t('addToPlaylist.trackCount', { count: playlist.track_count }) : ''}
         </div>
