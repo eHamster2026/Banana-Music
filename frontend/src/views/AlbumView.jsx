@@ -195,6 +195,7 @@ export default function AlbumView({ id }) {
           <div />
           <div />
           <div />
+          <div />
         </div>
         {tracks.map((track, i) => (
           <TrackRow

@@ -136,7 +136,9 @@
     "unliked": "已取消喜欢",
     "likeFailed": "操作失败",
     "likeTooltip": "喜欢",
-    "unlikeTooltip": "取消喜欢"
+    "unlikeTooltip": "取消喜欢",
+    "downloadTooltip": "下载音频文件",
+    "downloadUnavailable": "没有可下载的本地文件"
     ,"justNow": "刚刚",
     "minutesAgo": "{{count}}分钟前",
     "hoursAgo": "{{count}}小时前",

@@ -8,7 +8,7 @@ import { apiFetch, fmtTime } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
 import usePageRefresh from '../hooks/usePageRefresh'
 
-const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px'
+const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px 36px'
 
 export default function PlaylistView({ id }) {
   const { t } = useTranslation()
@@ -120,7 +120,7 @@ export default function PlaylistView({ id }) {
             <div>{t('common.colArtist')}</div>
             <div>{t('common.colAlbum')}</div>
             <div>{t('common.colDuration')}</div>
-            <div /><div /><div /><div />
+            <div /><div /><div /><div /><div />
           </div>
           {tracks.map((track, i) => (
             <LocalTrackRow

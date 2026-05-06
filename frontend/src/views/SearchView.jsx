@@ -189,7 +189,7 @@ export default function SearchView({ query }) {
               <div style={{ textAlign: 'right', paddingRight: 14 }}>#</div>
               <div>{t('common.colTitle')}</div>
               <div>{t('common.colDuration')}</div>
-              <div /><div /><div /><div />
+              <div /><div /><div /><div /><div />
             </div>
             {tracks.map((track, i) => (
               <TrackRow

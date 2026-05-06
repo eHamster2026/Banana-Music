@@ -136,7 +136,9 @@
     "unliked": "Removed from liked",
     "likeFailed": "Action failed",
     "likeTooltip": "Like",
-    "unlikeTooltip": "Unlike"
+    "unlikeTooltip": "Unlike",
+    "downloadTooltip": "Download audio file",
+    "downloadUnavailable": "No local file to download"
     ,"justNow": "just now",
     "minutesAgo": "{{count}} minutes ago",
     "hoursAgo": "{{count}} hours ago",

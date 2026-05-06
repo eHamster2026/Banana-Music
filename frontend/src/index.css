@@ -206,13 +206,13 @@ body {
 
 /* ── Track rows ── */
 .track-list-header {
-  display: grid; grid-template-columns: 44px 1fr auto 36px 36px 44px 36px;
+  display: grid; grid-template-columns: 44px 1fr auto 36px 36px 44px 36px 36px;
   padding: 6px 16px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
   color: var(--text-secondary); font-size: 11px; font-weight: 600;
   text-transform: uppercase; letter-spacing: 0.06em;
 }
 .track-row {
-  display: grid; grid-template-columns: 44px 1fr auto 36px 36px 44px 36px;
+  display: grid; grid-template-columns: 44px 1fr auto 36px 36px 44px 36px 36px;
   align-items: center; padding: 7px 16px; border-radius: 8px;
   cursor: pointer; transition: background 0.1s; user-select: none;
 }
@@ -228,6 +228,7 @@ body {
 .track-dur { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
 .track-like-btn {
   background: none; border: none; cursor: pointer;
+  text-decoration: none;
   color: var(--text-secondary); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   width: 32px; height: 32px;
@@ -235,14 +236,18 @@ body {
 }
 .track-row:hover .track-like-btn { opacity: 1; }
 .track-like-btn.liked { color: var(--accent); opacity: 1; }
+.track-like-btn:disabled { cursor: default; opacity: 0.25; }
+.track-row:hover .track-like-btn:disabled,
+.local-track-row:hover .track-like-btn:disabled { opacity: 0.25; }
 .track-like-btn:hover { background: rgba(255,255,255,0.08); }
+.track-like-btn:disabled:hover { background: none; }
 .track-like-btn svg { width: 15px; height: 15px; }
 .track-list-wrap { padding: 4px 28px 0; }
 
 /* ── Local file track rows ── */
 .local-track-header, .local-track-row {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr 60px 36px 36px 44px 36px;
+  grid-template-columns: 2fr 1fr 1fr 60px 36px 36px 44px 36px 36px;
   align-items: center; padding: 7px 16px;
 }
 .local-track-header {
@@ -255,7 +260,7 @@ body {
   transition: background 0.1s; user-select: none;
 }
 .local-track-row.ordered {
-  grid-template-columns: 44px 2fr 1fr 1fr 60px 36px 36px 44px 36px;
+  grid-template-columns: 44px 2fr 1fr 1fr 60px 36px 36px 44px 36px 36px;
 }
 .local-track-row:hover { background: rgba(255,255,255,0.06); }
 .local-track-row.now-playing .local-title { color: var(--accent); }
@@ -699,6 +704,12 @@ body {
     opacity: 1 !important;
   }
 
+  .track-like-btn:disabled,
+  .track-row:hover .track-like-btn:disabled,
+  .local-track-row:hover .track-like-btn:disabled {
+    opacity: 0.25 !important;
+  }
+
   .nav-btn,
   .ctrl-btn,
   .player-heart,
@@ -967,7 +978,7 @@ body {
   }
 
   .track-row {
-    grid-template-columns: minmax(0, 1fr) repeat(4, 40px);
+    grid-template-columns: minmax(0, 1fr) repeat(5, 40px);
     padding: 8px 8px;
   }
 
@@ -989,7 +1000,7 @@ body {
 
   .local-track-row,
   .local-track-row.ordered {
-    grid-template-columns: minmax(0, 1fr) repeat(4, 40px) !important;
+    grid-template-columns: minmax(0, 1fr) repeat(5, 40px) !important;
     padding: 8px;
   }
 
@@ -1247,7 +1258,7 @@ body {
   }
 
   .track-row {
-    grid-template-columns: minmax(0, 1fr) repeat(3, 38px);
+    grid-template-columns: minmax(0, 1fr) repeat(4, 38px);
   }
 
   .track-row .track-like-btn:first-of-type {
@@ -1256,7 +1267,7 @@ body {
 
   .local-track-row,
   .local-track-row.ordered {
-    grid-template-columns: minmax(0, 1fr) repeat(3, 38px) !important;
+    grid-template-columns: minmax(0, 1fr) repeat(4, 38px) !important;
   }
 
   .local-track-row .track-like-btn:first-of-type {

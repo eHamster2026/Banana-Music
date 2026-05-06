@@ -1,6 +1,6 @@
 import React from 'react'
 import { useTranslation } from 'react-i18next'
-import { fmtTime, formatTrackArtists, displayTrackTitle } from '../../api.js'
+import { downloadTrackUrl, fmtTime, formatTrackArtists, displayTrackTitle } from '../../api.js'
 import { useModal } from '../../contexts/ModalContext'
 import { useAuth } from '../../contexts/AuthContext'
 import { usePlayer } from '../../contexts/PlayerContext'
@@ -23,6 +23,7 @@ export default function LocalTrackRow({ track, num, contextIdx, isPlaying, onPla
   const albumTitle = track.album?.title  ?? track.album  ?? ''
   const duration   = track.duration_sec  ?? track.duration ?? 0
   const titleShown = displayTrackTitle(track)
+  const canDownload = Boolean(track?.stream_url?.startsWith('/resource/'))
 
   function handlePlayNext(e) {
     e.stopPropagation()
@@ -87,6 +88,33 @@ export default function LocalTrackRow({ track, num, contextIdx, isPlaying, onPla
           <path d="M8 13.5a.75.75 0 01-.53-.22l-5.47-5.47a3.75 3.75 0 015.3-5.3L8 3.19l.7-.7a3.75 3.75 0 115.3 5.3L8.53 13.28A.75.75 0 018 13.5z"/>
         </svg>
       </button>
+      {canDownload ? (
+        <a
+          className="track-like-btn"
+          href={downloadTrackUrl(track.id)}
+          download
+          target="_blank"
+          rel="noreferrer"
+          onClick={e => e.stopPropagation()}
+          title={t('common.downloadTooltip')}
+          aria-label={t('common.downloadTooltip')}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1.75a.75.75 0 01.75.75v5.19l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 011.06-1.06l1.72 1.72V2.5A.75.75 0 018 1.75zM3.25 10a.75.75 0 01.75.75v1.5h8v-1.5a.75.75 0 011.5 0V13a.75.75 0 01-.75.75h-9.5A.75.75 0 012.5 13v-2.25a.75.75 0 01.75-.75z"/>
+          </svg>
+        </a>
+      ) : (
+        <button
+          className="track-like-btn"
+          disabled
+          title={t('common.downloadUnavailable')}
+          aria-label={t('common.downloadUnavailable')}
+        >
+          <svg viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 1.75a.75.75 0 01.75.75v5.19l1.72-1.72a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 011.06-1.06l1.72 1.72V2.5A.75.75 0 018 1.75zM3.25 10a.75.75 0 01.75.75v1.5h8v-1.5a.75.75 0 011.5 0V13a.75.75 0 01-.75.75h-9.5A.75.75 0 012.5 13v-2.25a.75.75 0 01.75-.75z"/>
+          </svg>
+        </button>
+      )}
       {onRemove ? (
         <button
           className="track-like-btn"

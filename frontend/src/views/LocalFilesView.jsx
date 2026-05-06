@@ -149,7 +149,7 @@ export default function LocalFilesView() {
           <div>{t('common.colArtist')}</div>
           <div>{t('common.colAlbum')}</div>
           <div>{t('common.colDuration')}</div>
-          <div /><div /><div /><div />
+          <div /><div /><div /><div /><div />
         </div>
         {tracks.map((track, i) => (
           <LocalTrackRow
