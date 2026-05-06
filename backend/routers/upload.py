@@ -410,18 +410,48 @@ def _compute_pcm_md5(filepath: Path) -> bytes | None:
         return None
 
 
+def _compute_soundfile_pcm_md5(filepath: Path) -> bytes | None:
+    try:
+        import soundfile as sf
+        data, _ = sf.read(str(filepath), always_2d=True)
+        return hashlib.md5(data.astype("float32").tobytes()).digest()
+    except Exception as exc:
+        _app_log.error(
+            "无法用 soundfile 解码计算 audio_hash: path=%s error=%s: %s",
+            filepath,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return None
+
+
 def _compute_audio_hash(filepath: Path) -> bytes | None:
     """
     Unified format-agnostic audio hash (MD5 of raw PCM):
-    - FLAC  → read MD5 directly from STREAMINFO  (free, written by encoder)
-    - other → decode PCM and compute MD5          (lossy formats only)
+    - FLAC  → read STREAMINFO MD5 and verify it by decoding PCM
+    - other → decode PCM and compute MD5
     Since all lossless inputs are converted to FLAC before this is called,
-    the fast path is taken for every lossless file.
+    FLAC STREAMINFO mismatch means the file is corrupt or was produced with
+    incompatible PCM hash semantics, so ingestion is rejected.
     """
     if filepath.suffix.lower() == ".flac":
-        md5 = _read_flac_md5(filepath)
-        if md5:
-            return md5
+        md5 = _compute_soundfile_pcm_md5(filepath)
+        streaminfo_md5 = _read_flac_md5(filepath)
+        if streaminfo_md5 and md5 and streaminfo_md5 != md5:
+            _app_log.error(
+                "FLAC STREAMINFO MD5 与实际 PCM MD5 不一致: path=%s streaminfo=%s decoded=%s",
+                filepath,
+                streaminfo_md5.hex(),
+                md5.hex(),
+            )
+            return None
+        if streaminfo_md5 and md5 is None:
+            _app_log.error("FLAC 无法解码验证 STREAMINFO MD5: path=%s streaminfo=%s", filepath, streaminfo_md5.hex())
+            return None
+        if streaminfo_md5:
+            return streaminfo_md5
+        return md5
     md5 = _compute_pcm_md5(filepath)
     if md5 is not None and len(md5) != 16:
         _app_log.error("audio_hash 长度异常: path=%s length=%s", filepath, len(md5))

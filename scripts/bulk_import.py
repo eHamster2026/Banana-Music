@@ -1324,12 +1324,46 @@ def _compute_pcm_md5_for_dedup(path: Path) -> bytes | None:
         return None
 
 
+def _compute_soundfile_pcm_md5_for_dedup(path: Path) -> bytes | None:
+    try:
+        import soundfile as sf
+
+        data, _ = sf.read(str(path), always_2d=True)
+        return hashlib.md5(data.astype("float32").tobytes()).digest()
+    except Exception as exc:
+        logging.error(
+            "[%s] 无法用 soundfile 解码计算 audio_hash: %s: %s",
+            path.name,
+            type(exc).__name__,
+            exc,
+            exc_info=True,
+        )
+        return None
+
+
 def _compute_audio_hash_hex(path: Path) -> str | None:
     if path.suffix.lower() == ".flac":
-        md5 = _read_flac_md5_for_dedup(path)
-        if md5:
-            return md5.hex()
-
+        md5 = _compute_soundfile_pcm_md5_for_dedup(path)
+        streaminfo_md5 = _read_flac_md5_for_dedup(path)
+        if streaminfo_md5 and md5 and streaminfo_md5 != md5:
+            logging.error(
+                "[%s] FLAC STREAMINFO MD5 与实际 PCM MD5 不一致: streaminfo=%s decoded=%s",
+                path.name,
+                streaminfo_md5.hex(),
+                md5.hex(),
+            )
+            return None
+        if streaminfo_md5 and md5 is None:
+            logging.error("[%s] FLAC 无法解码验证 STREAMINFO MD5: streaminfo=%s", path.name, streaminfo_md5.hex())
+            return None
+        if streaminfo_md5:
+            return streaminfo_md5.hex()
+        if md5 is None:
+            return None
+        if len(md5) != 16:
+            logging.error("[%s] audio_hash 长度异常: %s", path.name, len(md5))
+            return None
+        return md5.hex()
     md5 = _compute_pcm_md5_for_dedup(path)
     if md5 is None:
         return None
