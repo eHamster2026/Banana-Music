@@ -386,9 +386,9 @@ export function PlayerProvider({ children }) {
     })
   }
 
-  function setContextQueue(tracks) {
+  const setContextQueue = useCallback((tracks) => {
     setContextQueueState(tracks)
-  }
+  }, [])
 
   async function loadAndPlayTrack(id) {
     try {
