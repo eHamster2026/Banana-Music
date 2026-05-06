@@ -270,7 +270,57 @@ def _persist_cover(cover_data: bytes | None, cover_ext: str | None) -> str | Non
     return filename
 
 
+_SOUNDFILE_FORMAT_SUFFIXES = {
+    "FLAC": ".flac",
+    "WAV": ".wav",
+    "OGG": ".ogg",
+}
+
+
+def _soundfile_info(filepath: Path):
+    try:
+        import soundfile as sf
+
+        return sf.info(str(filepath))
+    except Exception:
+        return None
+
+
+def _soundfile_duration(filepath: Path) -> int | None:
+    info = _soundfile_info(filepath)
+    if info and info.duration > 0:
+        return int(info.duration)
+    return None
+
+
+def _detected_content_suffix(filepath: Path) -> str | None:
+    info = _soundfile_info(filepath)
+    if not info:
+        return None
+    return _SOUNDFILE_FORMAT_SUFFIXES.get((info.format or "").upper())
+
+
+def _normalize_audio_file_suffix(filepath: Path) -> Path:
+    detected_suffix = _detected_content_suffix(filepath)
+    if not detected_suffix or filepath.suffix.lower() == detected_suffix:
+        return filepath
+    normalized = filepath.with_suffix(detected_suffix)
+    if normalized.exists():
+        raise RuntimeError(f"音频格式归一化失败：目标文件已存在 {normalized.name}")
+    filepath.rename(normalized)
+    logger.info(
+        "上传音频后缀与内容格式不一致，已按内容归一化: %s -> %s",
+        filepath.name,
+        normalized.name,
+    )
+    return normalized
+
+
 def _get_duration(filepath: Path) -> int:
+    sf_duration = _soundfile_duration(filepath)
+    if sf_duration is not None:
+        return sf_duration
+
     suffix = filepath.suffix.lower()
     if suffix == ".wav":
         try:
@@ -329,13 +379,6 @@ def _get_duration(filepath: Path) -> int:
         tag = TinyTag.get(str(filepath))
         if tag.duration and tag.duration > 0:
             return int(tag.duration)
-    except Exception:
-        pass
-    try:
-        import soundfile as sf
-        info = sf.info(str(filepath))
-        if info.duration > 0:
-            return int(info.duration)
     except Exception:
         pass
     return 0
@@ -698,20 +741,20 @@ def _process_uploaded_file_sync(
     3. Duration on the final (possibly converted) file
     Fingerprinting is deferred to the background idle worker.
     """
-    suffix     = save_path.suffix.lower()
-    final_path = save_path
+    final_path = _normalize_audio_file_suffix(save_path)
+    suffix     = final_path.suffix.lower()
 
     if suffix in LOSSLESS_EXTS:
         # WMA requires a codec probe; all other lossless exts are always eligible
-        do_convert = (suffix != ".wma") or _is_wma_lossless(save_path)
+        do_convert = (suffix != ".wma") or _is_wma_lossless(final_path)
 
         # .flac：不重编码、不跑 ReplayGain，避免丢 Picture / 改动文件
         if do_convert and suffix != ".flac":
             # APE / WAV / WMA-lossless: must convert — cannot serve these natively.
-            flac_path = save_path.with_suffix(".flac")
+            flac_path = final_path.with_suffix(".flac")
             if not flac_path.exists():
                 try:
-                    _convert_to_flac(save_path, flac_path)
+                    _convert_to_flac(final_path, flac_path)
                     _add_replaygain(flac_path)
                 except _NoBinaryError as exc:
                     flac_path.unlink(missing_ok=True)
@@ -719,7 +762,7 @@ def _process_uploaded_file_sync(
                 except Exception:
                     flac_path.unlink(missing_ok=True)
                     raise
-            save_path.unlink(missing_ok=True)   # original (APE/WAV/WMA) no longer needed
+            final_path.unlink(missing_ok=True)   # original (APE/WAV/WMA) no longer needed
             final_path = flac_path
 
     audio_hash = _compute_audio_hash(final_path)
