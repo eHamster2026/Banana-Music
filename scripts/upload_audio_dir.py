@@ -18,6 +18,7 @@ from bulk_import_utils import (
     _auth_headers,
     add_auth_options,
     SUPPORTED_EXTS,
+    read_embedded_cover,
     read_embedded_metadata,
     resolve_upload_token,
     upload_file_with_client,
@@ -64,14 +65,16 @@ async def upload_worker(
                     results[index - 1] = {"file": str(path), "status": "skipped", "detail": "title_or_artist_missing"}
                     continue
 
+                cover = await asyncio.to_thread(read_embedded_cover, path)
                 logging.info(
-                    "[worker-%02d %d/%s] 上传: %s title=%r artists=%r",
+                    "[worker-%02d %d/%s] 上传: %s title=%r artists=%r cover=%s",
                     worker_id,
                     index,
                     total_label,
                     path,
                     metadata.title,
                     metadata.artists,
+                    "yes" if cover else "no",
                 )
                 results[index - 1] = await upload_file_with_client(
                     client,
@@ -79,6 +82,7 @@ async def upload_worker(
                     base_url=args.base_url,
                     parse_metadata=False,
                     metadata=metadata,
+                    cover=cover,
                     poll_interval=args.poll_interval,
                     job_timeout=args.job_timeout,
                 )

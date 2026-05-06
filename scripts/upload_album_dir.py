@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Optional
 
 from bulk_import_utils import (
+    EmbeddedCover,
     MetadataResult,
     _auth_headers,
     add_auth_options,
@@ -240,8 +241,7 @@ async def run(args: argparse.Namespace) -> None:
             logging.info("[%d/%d] 上传专辑曲目: %s", index, len(paths), source.name)
             try:
                 upload_path = copy_to_tmp(source, tmp_dir)
-                if cover_data and cover_ext:
-                    embed_cover(upload_path, cover_data, cover_ext)
+                cover = EmbeddedCover(data=cover_data, ext=cover_ext) if cover_data and cover_ext else None
 
                 metadata = MetadataResult(
                     album=album_title,
@@ -256,6 +256,7 @@ async def run(args: argparse.Namespace) -> None:
                     token=token,
                     parse_metadata=False,
                     metadata=metadata,
+                    cover=cover,
                     poll_interval=args.poll_interval,
                     job_timeout=args.job_timeout,
                     request_timeout=args.request_timeout,

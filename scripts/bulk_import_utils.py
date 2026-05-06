@@ -28,6 +28,22 @@ class MetadataResult:
     confidence: float = 0.0
 
 
+@dataclass
+class EmbeddedCover:
+    data: bytes
+    ext: str = ".jpg"
+
+    @property
+    def mime(self) -> str:
+        if self.ext == ".png":
+            return "image/png"
+        if self.ext == ".webp":
+            return "image/webp"
+        if self.ext == ".gif":
+            return "image/gif"
+        return "image/jpeg"
+
+
 def _auth_headers(api_key: Optional[str], token: Optional[str]) -> dict[str, str]:
     if token:
         return {"Authorization": f"Bearer {token}"}
@@ -76,6 +92,20 @@ def _parse_track_number(value) -> int | None:
     except (TypeError, ValueError):
         return None
     return number if number > 0 else None
+
+
+def _detect_cover_ext(data: bytes, mime: str | None = None, fallback: str = ".jpg") -> str:
+    mime = (mime or "").lower()
+    if data.startswith(b"\x89PNG\r\n\x1a\n") or "png" in mime:
+        return ".png"
+    if (data.startswith(b"RIFF") and data[8:12] == b"WEBP") or "webp" in mime:
+        return ".webp"
+    if data.startswith((b"GIF87a", b"GIF89a")) or "gif" in mime:
+        return ".gif"
+    if data.startswith(b"\xff\xd8\xff") or "jpeg" in mime or "jpg" in mime:
+        return ".jpg"
+    fallback = fallback.lower()
+    return fallback if fallback in {".jpg", ".jpeg", ".png", ".webp", ".gif"} else ".jpg"
 
 
 def _ffprobe_tag_sets(path: Path, timeout: float) -> list[dict[str, object]] | None:
@@ -236,6 +266,61 @@ def read_embedded_metadata(path: Path, *, timeout: float = 5.0) -> MetadataResul
     )
 
 
+def read_embedded_cover(path: Path) -> EmbeddedCover | None:
+    try:
+        from mutagen import File as MutagenFile
+    except ImportError:
+        logging.error("请安装 mutagen 后再读取本地封面")
+        return None
+
+    try:
+        audio = MutagenFile(str(path))
+    except Exception as exc:
+        logging.warning("[%s] 封面读取失败: %s", path.name, exc)
+        return None
+    if audio is None:
+        return None
+
+    pictures = getattr(audio, "pictures", None)
+    if pictures:
+        selected = next((pic for pic in pictures if getattr(pic, "type", None) == 3), pictures[0])
+        data = bytes(getattr(selected, "data", b"") or b"")
+        if data:
+            return EmbeddedCover(data=data, ext=_detect_cover_ext(data, getattr(selected, "mime", None)))
+
+    for key in (audio.keys() if hasattr(audio, "keys") else []):
+        if not str(key).startswith("APIC"):
+            continue
+        frame = audio[key]
+        data = bytes(getattr(frame, "data", b"") or b"")
+        if data:
+            return EmbeddedCover(data=data, ext=_detect_cover_ext(data, getattr(frame, "mime", None)))
+
+    covr = audio.get("covr") if hasattr(audio, "get") else None
+    if covr:
+        from mutagen.mp4 import MP4Cover
+
+        item = covr[0]
+        data = bytes(item)
+        mime = "image/png" if getattr(item, "imageformat", None) == MP4Cover.FORMAT_PNG else "image/jpeg"
+        return EmbeddedCover(data=data, ext=_detect_cover_ext(data, mime))
+
+    for key in ("Cover Art (Front)", "COVER ART (FRONT)"):
+        val = audio.get(key) if hasattr(audio, "get") else None
+        if not val:
+            continue
+        first = val[0]
+        data = bytes(first) if hasattr(first, "__bytes__") else getattr(first, "value", first)
+        if isinstance(data, str):
+            data = data.encode("latin1", errors="ignore")
+        if b"\x00" in data:
+            data = data.split(b"\x00", 1)[1]
+        if data:
+            return EmbeddedCover(data=bytes(data), ext=_detect_cover_ext(bytes(data)))
+
+    return None
+
+
 def add_auth_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--base-url", default=os.getenv("BANANA_BASE_URL", "http://localhost:8000"), help="Banana Music 后端地址")
     parser.add_argument("--api-key", default=os.getenv("BANANA_API_KEY"), help="API Key（可用 BANANA_API_KEY）")
@@ -278,6 +363,19 @@ async def _stage_file_to_backend(
         return state
 
 
+async def _upload_cover_to_backend(client, base_url: str, cover: EmbeddedCover) -> str:
+    response = await client.post(
+        f"{base_url}/rest/x-banana/tracks/covers/upload",
+        files={"file": (f"cover{cover.ext}", cover.data, cover.mime)},
+    )
+    response.raise_for_status()
+    body = response.json()
+    cover_id = body.get("cover_id")
+    if not cover_id:
+        raise RuntimeError(f"封面上传完成但缺少 cover_id: {body}")
+    return cover_id
+
+
 def _metadata_payload(metadata: MetadataResult) -> dict:
     return {
         "title": metadata.title,
@@ -296,6 +394,7 @@ async def upload_file_with_client(
     base_url: str,
     parse_metadata: bool,
     metadata: Optional[MetadataResult] = None,
+    cover: Optional[EmbeddedCover] = None,
     poll_interval: float,
     job_timeout: float,
 ) -> dict:
@@ -314,6 +413,8 @@ async def upload_file_with_client(
     payload = {"file_key": file_key}
     if metadata is not None:
         payload["metadata"] = _metadata_payload(metadata)
+    if cover is not None:
+        payload["cover_id"] = await _upload_cover_to_backend(client, base_url, cover)
 
     logging.info("[%s] 写入曲库...", path.name)
     created = await client.post(
@@ -334,6 +435,7 @@ async def upload_file_to_backend(
     token: Optional[str],
     parse_metadata: bool,
     metadata: Optional[MetadataResult] = None,
+    cover: Optional[EmbeddedCover] = None,
     poll_interval: float,
     job_timeout: float,
     request_timeout: float,
@@ -352,6 +454,7 @@ async def upload_file_to_backend(
             base_url=base_url,
             parse_metadata=parse_metadata,
             metadata=metadata,
+            cover=cover,
             poll_interval=poll_interval,
             job_timeout=job_timeout,
         )
