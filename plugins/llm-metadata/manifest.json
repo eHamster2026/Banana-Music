@@ -9,7 +9,7 @@
       "ollama_base_url": {
         "type": "string",
         "description": "Ollama 服务地址（含协议和端口）",
-        "default": "http://172.19.240.1:11434"
+        "default": "http://localhost:11434"
       },
       "model": {
         "type": "string",

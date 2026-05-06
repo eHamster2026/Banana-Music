@@ -365,7 +365,7 @@ class LLMMetadataPlugin(MetadataPlugin):
         filename_stem: str,
         raw_tags: Optional[dict] = None,
     ) -> Optional[MetadataResult]:
-        base_url: str = self.ctx.config.get("ollama_base_url", "http://172.19.240.1:11434").rstrip("/")
+        base_url: str = self.ctx.config.get("ollama_base_url", "http://localhost:11434").rstrip("/")
         model: str    = self.ctx.config.get("model", "qwen3.5:latest")
         timeout: float = float(self.ctx.config.get("timeout_sec", 120))
         think: bool   = bool(self.ctx.config.get("ollama_think", False))
