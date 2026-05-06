@@ -8,6 +8,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 export UV_PROJECT_ENVIRONMENT="${ROOT}/backend/venv"
 # 本地 stack/backend/serve：指纹成功后自动调用元数据插件（覆盖 config / .env 默认 false）
 export UPLOAD_AUTO_METADATA_AFTER_FINGERPRINT=true
+export BANANA_DEV_PROXY_TARGET="${BANANA_DEV_PROXY_TARGET:-http://localhost:8000}"
 
 usage() {
   cat <<'EOF'
@@ -18,7 +19,7 @@ usage() {
 
 子命令:
   backend   启动 uvicorn（--reload），监听 0.0.0.0:8000
-  frontend  启动 Vite 开发服务器（默认 http://localhost:5173，API 已配置代理到 :8000）
+  frontend  启动 Vite 开发服务器（默认 http://localhost:5173，API/资源同源代理到 BANANA_DEV_PROXY_TARGET）
   stack     同一终端：后台 uvicorn + 前台 Vite（Ctrl+C 会结束两者）
   build     仅执行前端 production 构建（写入 frontend/dist，供后端静态托管）
   serve     假设 frontend/dist 已存在，仅启动 uvicorn（接近生产静态资源方式）

@@ -73,7 +73,7 @@ cd frontend && npm install
 # 终端 1 — 后端（自动重载）
 bash scripts/dev-local.sh backend   # uvicorn :8000, --log-level debug
 
-# 终端 2 — 前端（热更新，API 已代理到 :8000）
+# 终端 2 — 前端（热更新，API/资源同源代理到 BANANA_DEV_PROXY_TARGET，默认 :8000）
 bash scripts/dev-local.sh frontend  # Vite :5173
 ```
 
@@ -136,23 +136,22 @@ asyncio.create_task(some_bg_coro(...))
 ```
 POST /rest/x-banana/tracks/upload-file
   → 存文件到磁盘
-  → 线程池（_executor）：PCM hash + 时长（soundfile）+ Mutagen 标签
+  → 线程池（_executor）：PCM hash + 时长（soundfile）
   → PCM hash 格式无关去重
   → 写 UploadStaging（DB）
-  → 响应 {status, file_key}
+  → 响应 {job_id}；前端轮询 upload-status 获取 file_key 或 duplicate
 
 POST /rest/x-banana/tracks/create
   → 读 UploadStaging（audio_hash, duration, original_name）
-  → 线程池：_parse_tags(file)（Mutagen 重解析，< 50 ms）
+  → 使用客户端提交的 metadata / cover_id
   → asyncio.Lock 串行写 Track
   → 删 UploadStaging
-  → fire-and-forget：指纹任务 + parse_upload LLM 清洗
+  → fire-and-forget：指纹任务
   → 立即返回 {track_id, ...}
 
 后台任务：
   fingerprint_worker — 每秒轮询 fingerprint_tasks，计算 Chromaprint 指纹
     → 指纹写入后：run_fingerprint_lookup（MusicBrainz 等，若启用）
-  _bg_parse_upload_enrich — run_parse_upload（LLM 清洗），保守合并回 Track
 ```
 
 ### 元数据流水线（`services/pipeline.py`）
@@ -234,19 +233,27 @@ plugins/<id>/
 ### 上传工作流
 
 ```
-1. POST /rest/x-banana/tracks/upload-file，表单字段 file
+1. 客户端解析标签/封面，计算音频 hash，并可先查重：
+   GET /rest/x-banana/tracks/exists-by-hash?audio_hash=...
+
+2. 如需 LLM 清洗，客户端调用：
+   POST /rest/x-banana/plugins/llm-metadata/parse-metadata
+
+3. POST /rest/x-banana/tracks/upload-file，表单字段 file
    → 返回 job_id
 
-2. GET /rest/x-banana/tracks/upload-status/{job_id} 轮询至 state=done 或 error
+4. GET /rest/x-banana/tracks/upload-status/{job_id} 轮询至 state=done 或 error
    → status=duplicate → 记录 track_id，结束
    → status=ok        → 记录 file_key
 
-3. POST /rest/x-banana/tracks/create，请求体仅传 { "file_key": "..." }
+5. 可选：POST /rest/x-banana/tracks/covers/upload，取得 cover_id
+
+6. POST /rest/x-banana/tracks/create，提交 file_key、metadata、可选 cover_id
    → status=added     → 记录 track_id
    → status=duplicate → 记录 track_id
 ```
 
-入库初值由服务端 Mutagen 解析，后续可由 `parse_upload` 流水线补全或拆分多艺人；人工修正走 `PUT /rest/x-banana/admin/tracks/{id}`。重复内容统一由服务端计算 `audio_hash` 后识别。
+入库初值由客户端解析/清洗后提交；服务端不再解析音频标签，也不再等待 `parse_upload` 后台任务。重复内容可由客户端上传前按 hash 查询，也会在服务端上传处理阶段按 `audio_hash` 识别。
 
 ### 元数据整理工作流
 

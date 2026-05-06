@@ -2,6 +2,8 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 
+const proxyTarget = process.env.BANANA_DEV_PROXY_TARGET || 'http://localhost:8000'
+
 export default defineConfig({
   plugins: [react()],
   test: {
@@ -10,9 +12,9 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/rest': 'http://localhost:8000',
-      '/resource': 'http://localhost:8000',
-      '/covers': 'http://localhost:8000',
+      '/rest': proxyTarget,
+      '/resource': proxyTarget,
+      '/covers': proxyTarget,
     }
   },
   build: {

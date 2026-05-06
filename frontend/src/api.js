@@ -1,11 +1,6 @@
 import i18n from './i18n'
 
-const API = import.meta.env.VITE_API_BASE
-  || (window.location.protocol === 'file:' || window.location.hostname === ''
-    ? 'http://localhost:8000'
-    : window.location.port === '5173'
-      ? 'http://localhost:8000'
-      : '');
+const API = import.meta.env.VITE_API_BASE || ''
 
 export async function apiFetch(path, opts = {}, token = null) {
   const headers = { 'Content-Type': 'application/json' };
