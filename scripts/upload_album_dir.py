@@ -22,9 +22,10 @@ from typing import Optional
 
 from bulk_import_utils import (
     MetadataResult,
+    SUPPORTED_EXTS,
     _auth_headers,
     add_auth_options,
-    iter_audio_files,
+    read_embedded_metadata,
     resolve_upload_token,
     upload_file_to_backend,
 )
@@ -34,6 +35,23 @@ IMAGE_EXTS = frozenset({".jpg", ".jpeg", ".png", ".webp"})
 TEXT_EXTS = frozenset({".txt", ".md", ".markdown"})
 COVER_STEMS = ("cover", "front", "folder")
 DESCRIPTION_STEMS = ("description", "album", "readme", "README")
+
+
+def collect_audio_files(directory: Path, *, recursive: bool) -> list[Path]:
+    pattern = "**/*" if recursive else "*"
+    return [
+        path
+        for path in directory.glob(pattern)
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTS
+    ]
+
+
+def album_tracks_with_track_numbers(paths: list[Path], *, metadata_timeout: float) -> list[tuple[Path, int | None]]:
+    tracks: list[tuple[Path, int | None]] = []
+    for path in paths:
+        metadata = read_embedded_metadata(path, timeout=metadata_timeout)
+        tracks.append((path, metadata.track_number if metadata else None))
+    return tracks
 
 
 def _norm_title(value: str) -> str:
@@ -203,10 +221,11 @@ async def run(args: argparse.Namespace) -> None:
 
     album_title = args.album_title or directory.name
     album_artist = args.album_artist or "Various Artists"
-    paths = iter_audio_files(directory, recursive=not args.no_recursive)
+    paths = collect_audio_files(directory, recursive=not args.no_recursive)
     if not paths:
         logging.error("目录下没有支持的音频文件: %s", directory)
         sys.exit(1)
+    tracks = album_tracks_with_track_numbers(paths, metadata_timeout=args.metadata_check_timeout)
 
     token = await resolve_upload_token(args)
     headers = _auth_headers(args.api_key, token)
@@ -236,8 +255,9 @@ async def run(args: argparse.Namespace) -> None:
     results: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="banana-album-upload-") as tmp:
         tmp_dir = Path(tmp)
-        for index, source in enumerate(paths, start=1):
-            logging.info("[%d/%d] 上传专辑曲目: %s", index, len(paths), source.name)
+        for index, (source, track_number) in enumerate(tracks, start=1):
+            track_label = track_number if track_number is not None else "-"
+            logging.info("[%d/%d] 上传专辑曲目: %s track_number=%s", index, len(tracks), source.name, track_label)
             try:
                 upload_path = copy_to_tmp(source, tmp_dir)
                 if cover_data and cover_ext:
@@ -247,7 +267,7 @@ async def run(args: argparse.Namespace) -> None:
                     album=album_title,
                     album_artist=album_artist,
                     album_artists=[album_artist],
-                    track_number=index,
+                    track_number=track_number,
                 )
                 uploaded = await upload_file_to_backend(
                     upload_path,
@@ -288,6 +308,7 @@ def main() -> None:
     parser.add_argument("--album-artist", help="专辑艺人；默认 Various Artists")
     parser.add_argument("--allow-existing-album", action="store_true", help="允许同名专辑已存在时继续追加")
     parser.add_argument("--no-recursive", action="store_true", help="只读取目录第一层")
+    parser.add_argument("--metadata-check-timeout", default=5.0, type=float, help="单文件 TRACKNUMBER 标签读取超时秒数")
     parser.add_argument("--poll-interval", default=0.8, type=float, help="上传任务轮询间隔秒数")
     parser.add_argument("--job-timeout", default=120.0, type=float, help="单文件上传后台任务超时秒数")
     parser.add_argument("--request-timeout", default=120.0, type=float, help="HTTP 请求超时秒数")

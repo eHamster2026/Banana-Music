@@ -73,9 +73,10 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
     monkeypatch.setattr(upload_audio_dir, "upload_file_with_client", fake_upload_file_with_client)
 
     queue = asyncio.Queue()
-    queue.put_nowait((1, path))
+    queue.put_nowait((1, 1, path))
     queue.put_nowait(None)
     results = [None]
+    total_state = {"seen": 1, "final": 1}
     args = argparse.Namespace(
         metadata_check_timeout=5.0,
         base_url="http://test",
@@ -88,7 +89,7 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
         worker_id=1,
         queue=queue,
         results=results,
-        total=1,
+        total_state=total_state,
         client=object(),
         args=args,
         graceful_stop_event=asyncio.Event(),
@@ -179,3 +180,52 @@ async def test_run_second_stop_cancels_workers(monkeypatch, tmp_path):
 
     with pytest.raises(upload_audio_dir.UploadInterrupted):
         await asyncio.wait_for(upload_audio_dir.run(_upload_dir_args(tmp_path)), timeout=1)
+
+
+@pytest.mark.asyncio
+async def test_enqueue_paths_reads_files_on_demand(monkeypatch, tmp_path):
+    paths = [tmp_path / "first.flac", tmp_path / "second.flac", tmp_path / "third.flac"]
+    for path in paths:
+        path.write_bytes(b"fake")
+    yielded = []
+
+    def fake_iter_audio_files_lazy(_root, *, recursive):
+        for path in paths:
+            yielded.append(path)
+            yield path
+
+    async def fake_to_thread(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(upload_audio_dir, "_iter_audio_files_lazy", fake_iter_audio_files_lazy)
+    monkeypatch.setattr(upload_audio_dir.asyncio, "to_thread", fake_to_thread)
+
+    queue = asyncio.Queue(maxsize=1)
+    results = []
+    total_state = {"seen": 0, "final": None}
+    graceful_stop = asyncio.Event()
+    task = asyncio.create_task(
+        upload_audio_dir._enqueue_paths(
+            queue,
+            tmp_path,
+            True,
+            1,
+            results,
+            total_state,
+            graceful_stop,
+        )
+    )
+
+    await asyncio.sleep(0)
+
+    assert yielded == [paths[0]]
+    assert results == [None]
+    assert total_state["seen"] == 1
+    assert queue.get_nowait() == (1, None, paths[0])
+    queue.task_done()
+    graceful_stop.set()
+    await asyncio.sleep(0)
+    assert await asyncio.wait_for(queue.get(), timeout=1) is None
+    queue.task_done()
+    await asyncio.wait_for(task, timeout=1)
+    assert yielded == [paths[0]]

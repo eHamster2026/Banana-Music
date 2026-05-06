@@ -17,7 +17,7 @@ from pathlib import Path
 from bulk_import_utils import (
     _auth_headers,
     add_auth_options,
-    iter_audio_files,
+    SUPPORTED_EXTS,
     read_embedded_metadata,
     resolve_upload_token,
     upload_file_with_client,
@@ -31,9 +31,9 @@ class UploadInterrupted(Exception):
 async def upload_worker(
     *,
     worker_id: int,
-    queue: asyncio.Queue[tuple[int, Path] | None],
+    queue: asyncio.Queue[tuple[int, int | None, Path | None] | None],
     results: list[dict | None],
-    total: int,
+    total_state: dict[str, int | None],
     client,
     args: argparse.Namespace,
     graceful_stop_event: asyncio.Event,
@@ -46,11 +46,13 @@ async def upload_worker(
         try:
             if item is None:
                 return
-            index, path = item
+            index, total, path = item
+            assert path is not None
             if graceful_stop_event.is_set():
                 results[index - 1] = {"file": str(path), "status": "interrupted", "detail": "not started"}
                 continue
-            logging.info("[worker-%02d %d/%d] 检查标签: %s", worker_id, index, total, path)
+            total_label = str(total or total_state.get("seen") or "?")
+            logging.info("[worker-%02d %d/%s] 检查标签: %s", worker_id, index, total_label, path)
             try:
                 metadata = await asyncio.to_thread(
                     read_embedded_metadata,
@@ -63,10 +65,10 @@ async def upload_worker(
                     continue
 
                 logging.info(
-                    "[worker-%02d %d/%d] 上传: %s title=%r artists=%r",
+                    "[worker-%02d %d/%s] 上传: %s title=%r artists=%r",
                     worker_id,
                     index,
-                    total,
+                    total_label,
                     path,
                     metadata.title,
                     metadata.artists,
@@ -109,7 +111,7 @@ def _install_stop_handlers() -> tuple[asyncio.Event, asyncio.Event]:
     return graceful_stop_event, force_stop_event
 
 
-def _summarize_results(results: list[dict | None]) -> None:
+def _summarize_results(results: list[dict | None], total_seen: int) -> None:
     compact_results = [
         item or {"status": "interrupted", "detail": "not started"}
         for item in results
@@ -120,7 +122,8 @@ def _summarize_results(results: list[dict | None]) -> None:
     failed = sum(1 for item in compact_results if item.get("status") == "error")
     interrupted = sum(1 for item in compact_results if item.get("status") == "interrupted")
     logging.info(
-        "完成：新增 %d  重复 %d  跳过 %d  失败 %d  未处理 %d",
+        "完成：扫描 %d  新增 %d  重复 %d  跳过 %d  失败 %d  未处理 %d",
+        total_seen,
         added,
         duplicate,
         skipped,
@@ -129,33 +132,67 @@ def _summarize_results(results: list[dict | None]) -> None:
     )
 
 
+def _iter_audio_files_lazy(root: Path, *, recursive: bool):
+    pattern = "**/*" if recursive else "*"
+    for path in root.glob(pattern):
+        if path.is_file() and path.suffix.lower() in SUPPORTED_EXTS:
+            yield path
+
+
+def _next_audio_file(iterator) -> tuple[bool, Path | None]:
+    try:
+        return True, next(iterator)
+    except StopIteration:
+        return False, None
+
+
 async def _enqueue_paths(
-    queue: asyncio.Queue[tuple[int, Path] | None],
-    paths: list[Path],
+    queue: asyncio.Queue[tuple[int, int | None, Path | None] | None],
+    root: Path,
+    recursive: bool,
     concurrency: int,
+    results: list[dict | None],
+    total_state: dict[str, int | None],
     graceful_stop_event: asyncio.Event,
 ) -> None:
+    iterator = _iter_audio_files_lazy(root, recursive=recursive)
     try:
-        for item in enumerate(paths, start=1):
+        index = 0
+        while True:
             if graceful_stop_event.is_set():
                 logging.warning("已停止启动新任务")
                 break
-            await queue.put(item)
+            while queue.full():
+                if graceful_stop_event.is_set():
+                    logging.warning("已停止启动新任务")
+                    break
+                await asyncio.sleep(0.05)
+            if graceful_stop_event.is_set():
+                break
+            has_path, path = await asyncio.to_thread(_next_audio_file, iterator)
+            if not has_path:
+                break
+            assert path is not None
+            index += 1
+            results.append(None)
+            total_state["seen"] = index
+            await queue.put((index, None, path))
+        total_state["final"] = index
     except asyncio.CancelledError:
         return
     for _ in range(concurrency):
         await queue.put(None)
 
 
+async def _wait_for_upload_completion(producer_task: asyncio.Task, queue: asyncio.Queue) -> None:
+    await producer_task
+    await queue.join()
+
+
 async def run(args: argparse.Namespace) -> None:
     root = args.directory.expanduser()
     if not root.is_dir():
         logging.error("目录不存在: %s", root)
-        sys.exit(1)
-
-    paths = iter_audio_files(root, recursive=not args.no_recursive)
-    if not paths:
-        logging.error("目录下没有支持的音频文件: %s", root)
         sys.exit(1)
 
     token = await resolve_upload_token(args)
@@ -173,16 +210,17 @@ async def run(args: argparse.Namespace) -> None:
     max_connections = args.max_connections or max(concurrency * 2, concurrency)
     graceful_stop_event, force_stop_event = _install_stop_handlers()
     logging.info(
-        "压测上传启动：files=%d concurrency=%d max_connections=%d poll_interval=%.2fs metadata_check_timeout=%.1fs",
-        len(paths),
+        "压测上传启动：directory=%s concurrency=%d max_connections=%d poll_interval=%.2fs metadata_check_timeout=%.1fs",
+        root,
         concurrency,
         max_connections,
         args.poll_interval,
         args.metadata_check_timeout,
     )
 
-    queue: asyncio.Queue[tuple[int, Path] | None] = asyncio.Queue(maxsize=max(concurrency, 1))
-    results: list[dict | None] = [None] * len(paths)
+    queue: asyncio.Queue[tuple[int, int | None, Path | None] | None] = asyncio.Queue(maxsize=max(concurrency, 1))
+    results: list[dict | None] = []
+    total_state: dict[str, int | None] = {"seen": 0, "final": None}
 
     limits = httpx.Limits(max_connections=max_connections, max_keepalive_connections=max_connections)
     timeout = httpx.Timeout(args.request_timeout)
@@ -192,40 +230,52 @@ async def run(args: argparse.Namespace) -> None:
                 worker_id=index,
                 queue=queue,
                 results=results,
-                total=len(paths),
+                total_state=total_state,
                 client=client,
                 args=args,
                 graceful_stop_event=graceful_stop_event,
             ))
             for index in range(1, concurrency + 1)
         ]
-        producer_task = asyncio.create_task(_enqueue_paths(queue, paths, concurrency, graceful_stop_event))
-        join_task = asyncio.create_task(queue.join())
+        producer_task = asyncio.create_task(
+            _enqueue_paths(
+                queue,
+                root,
+                not args.no_recursive,
+                concurrency,
+                results,
+                total_state,
+                graceful_stop_event,
+            )
+        )
+        completion_task = asyncio.create_task(_wait_for_upload_completion(producer_task, queue))
         force_stop_task = asyncio.create_task(force_stop_event.wait())
         try:
             done, _pending = await asyncio.wait(
-                {join_task, force_stop_task},
+                {completion_task, force_stop_task},
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if force_stop_task in done:
                 for worker in workers:
                     worker.cancel()
                 producer_task.cancel()
-                join_task.cancel()
+                completion_task.cancel()
                 await asyncio.gather(*workers, return_exceptions=True)
-                await asyncio.gather(producer_task, join_task, return_exceptions=True)
+                await asyncio.gather(producer_task, completion_task, return_exceptions=True)
                 logging.warning("上传已立即中止")
             else:
                 force_stop_task.cancel()
-                await producer_task
                 await asyncio.gather(*workers)
+                if not results and not graceful_stop_event.is_set():
+                    logging.error("目录下没有支持的音频文件: %s", root)
+                    sys.exit(1)
         finally:
-            for task in (producer_task, join_task, force_stop_task):
+            for task in (producer_task, completion_task, force_stop_task):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(producer_task, join_task, force_stop_task, return_exceptions=True)
+            await asyncio.gather(producer_task, completion_task, force_stop_task, return_exceptions=True)
 
-    _summarize_results(results)
+    _summarize_results(results, int(total_state.get("seen") or 0))
     if force_stop_event.is_set():
         raise UploadInterrupted
 
