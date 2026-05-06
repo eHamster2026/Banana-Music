@@ -73,9 +73,10 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
     monkeypatch.setattr(upload_audio_dir, "upload_file_with_client", fake_upload_file_with_client)
 
     queue = asyncio.Queue()
-    queue.put_nowait((1, path))
+    queue.put_nowait((1, 1, path))
     queue.put_nowait(None)
     results = [None]
+    graceful_stop_event = asyncio.Event()
     args = argparse.Namespace(
         metadata_check_timeout=5.0,
         base_url="http://test",
@@ -88,9 +89,10 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
         worker_id=1,
         queue=queue,
         results=results,
-        total=1,
+        total_state={"seen": 1, "final": 1},
         client=object(),
         args=args,
+        graceful_stop_event=graceful_stop_event,
     )
 
     assert captured["path"] == path
