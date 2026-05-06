@@ -98,13 +98,14 @@ export function mergeMetadata(base, override) {
 export async function parseAudioFileMetadata(file) {
   const metadata = await parseBlob(file)
   const common = metadata?.common || {}
+  const pictures = common.picture || []
   return {
     metadata: metadataFromCommon(common),
     raw_tags: {
       ...nativeTags(metadata),
       ...metadataFromCommon(common),
     },
-    cover: selectCover(common.picture || []) || null,
+    cover: pictures.length ? selectCover(pictures) : null,
     audio_hash: null,
   }
 }
