@@ -167,8 +167,6 @@ async def test_export_playlist_json_includes_hashes_and_metadata(client):
         ])
         db.commit()
         playlist_id = playlist.id
-        track_with_hashes_id = track_with_hashes.id
-        feat_id = feat.id
     finally:
         db.close()
 
@@ -182,24 +180,25 @@ async def test_export_playlist_json_includes_hashes_and_metadata(client):
     data = response.json()
     assert data["schema"] == "banana-playlist.v1"
     assert data["playlist"]["name"] == "Export Mix"
-    assert data["playlist"]["track_count"] == 2
+    assert data["playlist"] == {"name": "Export Mix", "description": "For export"}
     assert [track["position"] for track in data["tracks"]] == [0, 1]
 
     first = data["tracks"][0]
-    assert first["track_id"] == track_with_hashes_id
     assert first["audio_hash"] == "00112233445566778899aabbccddeeff"
     assert first["audio_fingerprint"] == "0f10aabb"
     assert first["cover_hash"] == cover_hash
     assert first["title"] == "Export One"
     assert first["lyrics"] == "export lyrics"
-    assert first["artist"]["name"] == "Export Artist"
-    assert first["featured_artists"] == [{
-        "id": feat_id,
-        "name": "Featured Export",
-        "art_color": "art-2",
-        "ext": {},
-    }]
-    assert first["album"]["title"] == "Export Album"
+    assert first["artist"] == {"name": "Export Artist", "ext": {"sort": "artist"}}
+    assert first["featured_artists"] == [{"name": "Featured Export", "ext": {}}]
+    assert first["album"] == {
+        "title": "Export Album",
+        "artist": {"name": "Export Artist", "ext": {"sort": "artist"}},
+        "featured_artists": [],
+        "release_date": "2026-01-02",
+        "album_type": "album",
+        "ext": {"label": "Banana"},
+    }
     assert first["ext"] == {"work": "BWV 1"}
 
     second = data["tracks"][1]
@@ -210,6 +209,12 @@ async def test_export_playlist_json_includes_hashes_and_metadata(client):
     assert "stream_url" not in encoded
     assert "download_url" not in encoded
     assert "cover_url" not in encoded
+    assert "track_id" not in encoded
+    assert "art_color" not in encoded
+    assert "is_system" not in encoded
+    assert "is_featured" not in encoded
+    assert "track_count" not in encoded
+    assert '"id"' not in encoded
 
 
 @pytest.mark.asyncio
@@ -227,7 +232,7 @@ async def test_export_empty_playlist(client):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["playlist"]["track_count"] == 0
+    assert data["playlist"] == {"name": "Empty Export", "description": None}
     assert data["tracks"] == []
 
 

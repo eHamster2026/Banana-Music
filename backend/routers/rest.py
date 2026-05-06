@@ -91,9 +91,7 @@ def _artist_export(artist: models.Artist | None) -> dict[str, Any] | None:
     if not artist:
         return None
     return {
-        "id": artist.id,
         "name": artist.name,
-        "art_color": artist.art_color,
         "ext": artist.ext or {},
     }
 
@@ -102,13 +100,11 @@ def _album_export(album: models.Album | None) -> dict[str, Any] | None:
     if not album:
         return None
     return {
-        "id": album.id,
         "title": album.title,
         "artist": _artist_export(album.artist),
-        "featured_artists": [_artist_export(artist) for artist in album.featured_artists],
+        "featured_artists": [_artist_export(artist) for artist in album.featured_artists if _artist_export(artist)],
         "release_date": album.release_date,
         "album_type": album.album_type,
-        "art_color": album.art_color,
         "ext": album.ext or {},
     }
 
@@ -132,7 +128,6 @@ def _track_export(track: models.Track, position: int) -> dict[str, Any]:
     cover_path = track.cover_path or (track.album.cover_path if track.album else None)
     return {
         "position": position,
-        "track_id": track.id,
         "audio_hash": _bytes_hex(track.audio_hash),
         "audio_fingerprint": _bytes_hex(track.audio_fingerprint),
         "cover_hash": _cover_hash_from_path(cover_path),
@@ -141,7 +136,7 @@ def _track_export(track: models.Track, position: int) -> dict[str, Any]:
         "track_number": track.track_number,
         "lyrics": track.lyrics,
         "artist": _artist_export(track.artist),
-        "featured_artists": [_artist_export(artist) for artist in track.featured_artists],
+        "featured_artists": [_artist_export(artist) for artist in track.featured_artists if _artist_export(artist)],
         "album": _album_export(track.album),
         "ext": track.ext or {},
     }
@@ -156,13 +151,8 @@ def _playlist_export_payload(playlist: models.Playlist) -> dict[str, Any]:
         "schema": "banana-playlist.v1",
         "exported_at": models.utcnow(),
         "playlist": {
-            "id": playlist.id,
             "name": playlist.name,
             "description": playlist.description,
-            "art_color": playlist.art_color,
-            "is_system": playlist.is_system,
-            "is_featured": playlist.is_featured,
-            "track_count": len(tracks),
         },
         "tracks": tracks,
     }

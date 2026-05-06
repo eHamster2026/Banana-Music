@@ -137,7 +137,7 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 }
 ```
 
-导出歌单返回 `banana-playlist.v1` JSON，不包含音频文件本体，也不包含 `stream_url` / `download_url` / `cover_url`。曲目按歌单顺序输出，使用 `audio_hash` 作为稳定音频标识；如已有 Chromaprint 指纹则包含 `audio_fingerprint`，如有封面则包含封面内容 SHA-256 `cover_hash`。
+导出歌单返回 `banana-playlist.v1` JSON，不包含音频文件本体，也不包含 `stream_url` / `download_url` / `cover_url`。曲目按歌单顺序输出，使用 `audio_hash` 作为稳定音频标识；如已有 Chromaprint 指纹则包含 `audio_fingerprint`，如有封面则包含封面内容 SHA-256 `cover_hash`。导出内容保留曲目、艺人和专辑的 `ext` 元数据，但不包含数据库 `id`、颜色或系统标记等库内 UI/实现字段。
 
 ### 播放队列
 
