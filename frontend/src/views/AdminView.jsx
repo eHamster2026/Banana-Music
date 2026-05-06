@@ -698,6 +698,10 @@ const PLUGIN_INPUT_STYLE = {
   padding: '7px 10px', color: 'var(--text)', fontSize: 13, outline: 'none', width: '100%', boxSizing: 'border-box',
 }
 
+function pluginConfigChanged(a = {}, b = {}) {
+  return JSON.stringify(a || {}) !== JSON.stringify(b || {})
+}
+
 function PluginConfigField({ fieldKey, spec, value, onChange }) {
   const type = spec.type || 'string'
   const label = spec.title || fieldKey
@@ -811,19 +815,27 @@ function PluginsTab({ token }) {
     setForm(prev => ({ ...prev, [fieldKey]: value }))
   }
 
+  async function saveCurrentConfig({ showSavedToast = true } = {}) {
+    if (!selectedId) return
+    const updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/config`, {
+      method: 'PUT',
+      body: JSON.stringify({ config: form }),
+    }, token)
+    setDetail(updated)
+    setForm(updated.config || {})
+    mergePluginSummary(updated)
+    if (showSavedToast) {
+      showToast(t('admin.pluginSaved', { name: updated.name }))
+    }
+    return updated
+  }
+
   async function saveConfig(e) {
     e.preventDefault()
     if (!selectedId) return
     setSaving(true)
     try {
-      const updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/config`, {
-        method: 'PUT',
-        body: JSON.stringify({ config: form }),
-      }, token)
-      setDetail(updated)
-      setForm(updated.config || {})
-      mergePluginSummary(updated)
-      showToast(t('admin.pluginSaved', { name: updated.name }))
+      await saveCurrentConfig()
     } catch (e) {
       showToast(t('admin.pluginSaveFailed') + e.message)
     } finally {
@@ -835,9 +847,23 @@ function PluginsTab({ token }) {
     if (!selectedId) return
     setActing(true)
     try {
-      const updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/${action}`, {
-        method: 'POST',
-      }, token)
+      let updated
+      const shouldSaveBeforeAction = (
+        (action === 'reload' || action === 'enable')
+        && pluginConfigChanged(form, detail?.config || {})
+      )
+      if (shouldSaveBeforeAction) {
+        updated = await saveCurrentConfig({ showSavedToast: false })
+        if (action !== 'reload') {
+          updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/${action}`, {
+            method: 'POST',
+          }, token)
+        }
+      } else {
+        updated = await apiFetch(`/rest/x-banana/plugins/${selectedId}/${action}`, {
+          method: 'POST',
+        }, token)
+      }
       setDetail(updated)
       setForm(updated.config || {})
       mergePluginSummary(updated)
