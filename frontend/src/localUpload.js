@@ -30,6 +30,14 @@ function createMetadataPayload(metadata) {
   )
 }
 
+function logUploadError(stage, file, err, extra = {}) {
+  console.error(`[upload] ${stage} failed`, {
+    file: file?.name,
+    ...extra,
+    error: err,
+  })
+}
+
 export async function uploadLocalAudioFiles({
   files,
   token,
@@ -59,6 +67,7 @@ export async function uploadLocalAudioFiles({
     try {
       parsed = await parseAudioFileMetadata(file)
     } catch (err) {
+      logUploadError('metadata parse', file, err)
       showToast(i18n.t('upload.processFailedWithReason', {
         name: file.name,
         reason: err?.message || 'metadata parse failed',
@@ -76,7 +85,8 @@ export async function uploadLocalAudioFiles({
           finish(true)
           return
         }
-      } catch {
+      } catch (err) {
+        logUploadError('pre-upload duplicate check', file, err, { audio_hash: parsed.audio_hash })
         // 预检失败不阻止上传；服务端上传阶段仍会做权威查重。
       }
     }
@@ -89,6 +99,7 @@ export async function uploadLocalAudioFiles({
       }, token)
       cleanedMetadata = createMetadataPayload(mergeMetadata(parsed.metadata, llm))
     } catch (err) {
+      logUploadError('metadata cleanup', file, err, { raw_tags: parsed.raw_tags || parsed.metadata || {} })
       showToast(i18n.t('upload.processFailedWithReason', {
         name: file.name,
         reason: err?.message || 'metadata cleanup failed',
@@ -101,7 +112,8 @@ export async function uploadLocalAudioFiles({
     try {
       const uploaded = await uploadSingleFile(file, token)
       jobId = uploaded.job_id
-    } catch {
+    } catch (err) {
+      logUploadError('file upload', file, err)
       showToast(i18n.t('upload.uploadFailed', { name: file.name }))
       finish(false)
       return
@@ -111,6 +123,7 @@ export async function uploadLocalAudioFiles({
     try {
       uploadResult = await pollUploadJob(jobId, token)
     } catch (err) {
+      logUploadError('upload processing', file, err, { job_id: jobId })
       if (err?.message) {
         showToast(i18n.t('upload.processFailedWithReason', { name: file.name, reason: err.message }))
       } else {
@@ -133,7 +146,8 @@ export async function uploadLocalAudioFiles({
       try {
         const uploadedCover = await uploadCoverImage(coverBlob, token)
         coverId = uploadedCover.cover_id || null
-      } catch {
+      } catch (err) {
+        logUploadError('cover upload', file, err)
         showToast(i18n.t('upload.writeFailed', { name: file.name }))
         finish(false)
         return
@@ -159,7 +173,8 @@ export async function uploadLocalAudioFiles({
       }
       showToast(i18n.t('upload.writeFailed', { name: file.name }))
       finish(false)
-    } catch {
+    } catch (err) {
+      logUploadError('track create', file, err, { file_key: uploadResult.file_key, metadata: cleanedMetadata, cover_id: coverId })
       showToast(i18n.t('upload.writeFailed', { name: file.name }))
       finish(false)
     }
