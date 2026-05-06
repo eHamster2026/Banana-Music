@@ -4,7 +4,7 @@ import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { apiFetch, fmtTime } from '../api.js'
+import { apiFetch, exportPlaylistUrl, fmtTime } from '../api.js'
 import LocalTrackRow from '../components/shared/LocalTrackRow'
 import usePageRefresh from '../hooks/usePageRefresh'
 
@@ -91,18 +91,31 @@ export default function PlaylistView({ id }) {
             {playlist.description && <span>{playlist.description} · </span>}
             <span>{t('common.trackCount', { count: tracks.length })}{totalDur > 0 ? ` · ${fmtTime(totalDur)}` : ''}</span>
           </div>
-          {tracks.length > 0 && (
-            <div className="detail-actions">
-              <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
-                <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
-                {t('common.play')}
-              </button>
-              <button className="btn-secondary" onClick={() => {
-                const shuffled = [...tracks].sort(() => Math.random() - 0.5)
-                setContextQueue(shuffled); playFromContext(0)
-              }}>{t('common.shuffle')}</button>
-            </div>
-          )}
+          <div className="detail-actions">
+            {tracks.length > 0 && (
+              <>
+                <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
+                  <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
+                  {t('common.play')}
+                </button>
+                <button className="btn-secondary" onClick={() => {
+                  const shuffled = [...tracks].sort(() => Math.random() - 0.5)
+                  setContextQueue(shuffled); playFromContext(0)
+                }}>{t('common.shuffle')}</button>
+              </>
+            )}
+            <a
+              className="btn-secondary"
+              href={exportPlaylistUrl(id)}
+              download
+              target="_blank"
+              rel="noreferrer"
+              title={t('playlist.export')}
+              style={{ textDecoration: 'none' }}
+            >
+              {t('playlist.export')}
+            </a>
+          </div>
         </div>
       </div>
 

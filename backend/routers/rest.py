@@ -1,8 +1,12 @@
+import hashlib
+import json
+import re
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import quote
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import FileResponse, RedirectResponse, Response
 from starlette.background import BackgroundTask
 from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
@@ -31,6 +35,7 @@ from services.track_load_options import track_out_load_options
 router = APIRouter(prefix="/rest", tags=["Rest"])
 
 _PLAYLIST_NAME_UNIQUE_INDEX = "uq_playlists_user_id_lower_name"
+_SHA256_HEX_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 def _is_playlist_name_unique_violation(exc: IntegrityError) -> bool:
@@ -74,6 +79,100 @@ def _playlist_detail(p: models.Playlist) -> schemas.PlaylistDetail:
         track_count=len(tracks),
         tracks=tracks,
     )
+
+
+def _bytes_hex(value: bytes | bytearray | memoryview | None) -> str | None:
+    if value is None:
+        return None
+    return bytes(value).hex()
+
+
+def _artist_export(artist: models.Artist | None) -> dict[str, Any] | None:
+    if not artist:
+        return None
+    return {
+        "id": artist.id,
+        "name": artist.name,
+        "art_color": artist.art_color,
+        "ext": artist.ext or {},
+    }
+
+
+def _album_export(album: models.Album | None) -> dict[str, Any] | None:
+    if not album:
+        return None
+    return {
+        "id": album.id,
+        "title": album.title,
+        "artist": _artist_export(album.artist),
+        "featured_artists": [_artist_export(artist) for artist in album.featured_artists],
+        "release_date": album.release_date,
+        "album_type": album.album_type,
+        "art_color": album.art_color,
+        "ext": album.ext or {},
+    }
+
+
+def _cover_hash_from_path(cover_path: str | None) -> str | None:
+    if not cover_path:
+        return None
+    stem = Path(cover_path).stem
+    if _SHA256_HEX_RE.fullmatch(stem):
+        return stem.lower()
+    path = _cover_file_from_path(cover_path)
+    if not path or not path.exists():
+        return None
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+
+
+def _track_export(track: models.Track, position: int) -> dict[str, Any]:
+    cover_path = track.cover_path or (track.album.cover_path if track.album else None)
+    return {
+        "position": position,
+        "track_id": track.id,
+        "audio_hash": _bytes_hex(track.audio_hash),
+        "audio_fingerprint": _bytes_hex(track.audio_fingerprint),
+        "cover_hash": _cover_hash_from_path(cover_path),
+        "title": track.title,
+        "duration_sec": track.duration_sec,
+        "track_number": track.track_number,
+        "lyrics": track.lyrics,
+        "artist": _artist_export(track.artist),
+        "featured_artists": [_artist_export(artist) for artist in track.featured_artists],
+        "album": _album_export(track.album),
+        "ext": track.ext or {},
+    }
+
+
+def _playlist_export_payload(playlist: models.Playlist) -> dict[str, Any]:
+    tracks = [
+        _track_export(item.track, item.position if item.position is not None else index)
+        for index, item in enumerate(playlist.playlist_tracks)
+    ]
+    return {
+        "schema": "banana-playlist.v1",
+        "exported_at": models.utcnow(),
+        "playlist": {
+            "id": playlist.id,
+            "name": playlist.name,
+            "description": playlist.description,
+            "art_color": playlist.art_color,
+            "is_system": playlist.is_system,
+            "is_featured": playlist.is_featured,
+            "track_count": len(tracks),
+        },
+        "tracks": tracks,
+    }
+
+
+def _playlist_export_filename(name: str) -> str:
+    safe = re.sub(r'[\\/\x00-\x1f<>:"|?*]+', "_", (name or "").strip()).strip(" ._")
+    if not safe:
+        safe = "playlist"
+    return f"{safe[:120]}.banana-playlist.json"
 
 
 def _local_file_from_stream_url(stream_url: str | None) -> Path | None:
@@ -731,6 +830,28 @@ def get_playlist(
         raise HTTPException(404, "歌单不存在")
     mark_track_likes(db, [pt.track for pt in playlist.playlist_tracks], user)
     return _playlist_detail(playlist)
+
+
+@router.get("/exportPlaylist")
+def export_playlist(
+    id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    playlist = db.query(models.Playlist).filter(models.Playlist.id == id).first()
+    if not playlist:
+        raise HTTPException(404, "歌单不存在")
+    payload = _playlist_export_payload(playlist)
+    filename = _playlist_export_filename(playlist.name)
+    encoded = quote(filename)
+    return Response(
+        content=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="playlist.banana-playlist.json"; filename*=UTF-8\'\'{encoded}'
+            ),
+        },
+    )
 
 
 @router.post("/createPlaylist", response_model=schemas.PlaylistOut)

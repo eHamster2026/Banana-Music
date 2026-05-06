@@ -152,6 +152,10 @@ export function downloadTrackUrl(trackId) {
   return API + `/rest/download?id=${encodeURIComponent(trackId)}`
 }
 
+export function exportPlaylistUrl(playlistId) {
+  return API + `/rest/exportPlaylist?id=${encodeURIComponent(playlistId)}`
+}
+
 /** 无内嵌标题时后端存空串，列表/播放器用曲目 id 占位（如 #66） */
 export function displayTrackTitle(track) {
   if (!track) return ''

@@ -220,7 +220,8 @@
     "removeTrack": "Removed from playlist",
     "removeFailed": "Failed to remove",
     "addToPlaylist": "Add to playlist",
-    "removeFromPlaylist": "Remove from playlist"
+    "removeFromPlaylist": "Remove from playlist",
+    "export": "Export"
   },
   "recent": {
     "pageTitle": "Recently Added",

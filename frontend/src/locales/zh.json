@@ -220,7 +220,8 @@
     "removeTrack": "已从歌单中移除",
     "removeFailed": "移除失败",
     "addToPlaylist": "添加到歌单",
-    "removeFromPlaylist": "从歌单中移除"
+    "removeFromPlaylist": "从歌单中移除",
+    "export": "导出"
   },
   "recent": {
     "pageTitle": "最近添加",
