@@ -102,8 +102,12 @@ body {
 .nav-btn:hover:not(:disabled) { background: rgba(255,255,255,0.14); }
 .nav-btn:disabled { opacity: 0.3; cursor: default; }
 .nav-btn svg { width: 13px; height: 13px; }
-.topbar-title { font-size: 20px; font-weight: 700; letter-spacing: -0.4px; flex: 1; }
-.search-wrap { position: relative; }
+.topbar-title {
+  font-size: 20px; font-weight: 700; letter-spacing: -0.4px;
+  flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.search-wrap { position: relative; flex-shrink: 0; }
 .search-bar {
   display: flex; align-items: center; gap: 8px;
   background: rgba(255,255,255,0.08); border-radius: 20px; padding: 6px 14px;
@@ -111,7 +115,7 @@ body {
 }
 .search-bar:focus-within { width: 260px; background: rgba(255,255,255,0.12); }
 .search-bar svg { width: 13px; height: 13px; color: var(--text-secondary); flex-shrink: 0; }
-.search-bar input { background: none; border: none; outline: none; color: var(--text); font-size: 13px; width: 100%; }
+.search-bar input { background: none; border: none; outline: none; color: var(--text); font-size: 13px; width: 100%; min-width: 0; }
 .search-bar input::placeholder { color: var(--text-secondary); }
 .search-dropdown {
   position: absolute; top: calc(100% + 8px); right: 0; width: 320px;
@@ -226,22 +230,8 @@ body {
 .track-title { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .track-artist-small { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px; }
 .overflow-text {
-  position: relative; display: block; min-width: 0;
-  overflow: visible; text-overflow: clip;
+  min-width: 0;
 }
-.overflow-text-value {
-  display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.overflow-text-popover {
-  display: none; position: absolute; left: 0; top: 50%; transform: translateY(-50%);
-  max-width: min(70vw, 720px); z-index: 30; pointer-events: none;
-  padding: 5px 8px; border-radius: 6px;
-  background: rgba(20,20,20,0.96); border: 1px solid var(--border);
-  box-shadow: 0 10px 24px rgba(0,0,0,0.38);
-  color: var(--text); font-size: inherit; font-weight: inherit; line-height: 1.35;
-  white-space: normal; overflow-wrap: anywhere;
-}
-.overflow-text:hover .overflow-text-popover { display: block; }
 .track-dur { font-size: 12px; color: var(--text-secondary); font-variant-numeric: tabular-nums; text-align: right; }
 .track-like-btn {
   background: none; border: none; cursor: pointer;

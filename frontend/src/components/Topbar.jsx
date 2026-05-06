@@ -121,7 +121,7 @@ export default function Topbar() {
                     className="search-drop-art"
                     alt=""
                   />
-                  <div>
+                  <div className="search-drop-copy">
                     <div className="search-drop-name">{h.title}</div>
                     <div className="search-drop-meta">{h.artist} · {h.plugin_id}</div>
                   </div>
