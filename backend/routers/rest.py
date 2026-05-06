@@ -165,6 +165,18 @@ def _playlist_export_filename(name: str) -> str:
     return f"{safe[:120]}.banana-playlist.json"
 
 
+def _safe_download_stem(value: str) -> str:
+    return re.sub(r'[\\/\x00-\x1f<>:"|?*]+', "_", value).strip(" ._")
+
+
+def _track_download_filename(track: models.Track, local: Path) -> str:
+    title = _safe_download_stem((track.title or "").strip()) or f"track-{track.id}"
+    artist = _safe_download_stem((track.artist.name if track.artist else "").strip())
+    stem = f"{title} - {artist}" if artist else title
+    suffix = local.suffix or ".flac"
+    return f"{stem[:180]}{suffix}"
+
+
 def _local_file_from_stream_url(stream_url: str | None) -> Path | None:
     if not stream_url or not stream_url.startswith("/resource/"):
         return None
@@ -347,7 +359,7 @@ def download(id: int = Query(...), db: Session = Depends(get_db)):
         raise HTTPException(500, f"下载标签写入失败: {type(exc).__name__}")
     return FileResponse(
         tagged,
-        filename=local.name,
+        filename=_track_download_filename(track, local),
         background=BackgroundTask(lambda: tagged.unlink(missing_ok=True)),
     )
 

@@ -201,6 +201,7 @@ async def test_download_writes_database_tags_and_hidden_images(client, monkeypat
 
     response = await client.get("/rest/download", params={"id": track_id})
     assert response.status_code == 200
+    assert "Download%20Track%20-%20Download%20Artist.flac" in response.headers["content-disposition"]
     downloaded = tmp_path / "downloaded.flac"
     downloaded.write_bytes(response.content)
 
