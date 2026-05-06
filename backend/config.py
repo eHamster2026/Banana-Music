@@ -16,6 +16,9 @@ class Settings(BaseSettings):
 
     # ── Database ───────────────────────────────────────────────────────────────
     database_url: str = "sqlite:///music.db"
+    # Log SQL statements whose DB execution time is at or above this threshold.
+    # Set to 0 to disable slow SQL logging.
+    slow_sql_threshold_ms: int = 1000
 
     # ── CORS ───────────────────────────────────────────────────────────────────
     # Comma-separated origins, e.g. "http://localhost:5173,https://example.com"
