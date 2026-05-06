@@ -34,6 +34,10 @@ class AlbumDetail(AlbumOut):
     model_config = {"from_attributes": True}
 
 
+class AlbumCoverUpdate(BaseModel):
+    cover_id: str = Field(..., min_length=1)
+
+
 # ── Track ────────────────────────────────────────────
 class TrackBase(BaseModel):
     title: str

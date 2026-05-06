@@ -1,10 +1,10 @@
-import React, { useCallback, useEffect, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { apiFetch, fmtTime, formatAlbumArtists } from '../api.js'
+import { apiFetch, fmtTime, formatAlbumArtists, updateAlbumCover, uploadCoverImage } from '../api.js'
 import TrackRow from '../components/shared/TrackRow'
 import CoverArt from '../components/shared/CoverArt'
 import usePageRefresh from '../hooks/usePageRefresh'
@@ -18,6 +18,8 @@ export default function AlbumView({ id }) {
   const [album, setAlbum]       = useState(null)
   const [loading, setLoading]   = useState(true)
   const [inLibrary, setInLibrary] = useState(false)
+  const [coverUploading, setCoverUploading] = useState(false)
+  const coverInputRef = useRef(null)
 
   const loadAlbum = useCallback(({ initial = false } = {}) => {
     if (!id) return
@@ -79,6 +81,31 @@ export default function AlbumView({ id }) {
     }
   }
 
+  function openCoverPicker() {
+    if (!token) { showToast(t('common.loginFirst')); return }
+    coverInputRef.current?.click()
+  }
+
+  async function handleCoverSelected(event) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file) return
+    if (!token) { showToast(t('common.loginFirst')); return }
+
+    setCoverUploading(true)
+    try {
+      const uploaded = await uploadCoverImage(file, token)
+      const updated = await updateAlbumCover(id, uploaded.cover_id, token)
+      setAlbum(current => current ? { ...current, ...updated, tracks: current.tracks } : current)
+      showToast(t('albums.coverUpdated'))
+    } catch (err) {
+      console.error('Album cover upload failed', err)
+      showToast(t('albums.coverUpdateFailed'))
+    } finally {
+      setCoverUploading(false)
+    }
+  }
+
   if (loading) return <div className="loading-wrap"><div className="spinner" /></div>
   if (!album) return <div className="empty-state"><div className="empty-title">{t('albums.notFound')}</div></div>
 
@@ -92,12 +119,38 @@ export default function AlbumView({ id }) {
   return (
     <div>
       <div className="detail-header">
-        <CoverArt
-          coverUrl={album.cover_url}
-          colorClass={album.art_color || 'art-1'}
-          className="detail-art"
-          alt={`${album.title} ${t('common.coverAlt')}`}
-        />
+        <div className="detail-art-wrap">
+          <CoverArt
+            coverUrl={album.cover_url}
+            colorClass={album.art_color || 'art-1'}
+            className="detail-art"
+            alt={`${album.title} ${t('common.coverAlt')}`}
+          />
+          {!album.cover_url && (
+            <>
+              <button
+                className="detail-cover-upload"
+                type="button"
+                onClick={openCoverPicker}
+                disabled={coverUploading}
+                title={t('albums.uploadCover')}
+                aria-label={t('albums.uploadCover')}
+              >
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <path d="M2.5 6.5h2l1.2-2h4.6l1.2 2h2a1 1 0 011 1v5a1 1 0 01-1 1h-11a1 1 0 01-1-1v-5a1 1 0 011-1z"/>
+                  <circle cx="8" cy="10" r="2.25"/>
+                </svg>
+              </button>
+              <input
+                ref={coverInputRef}
+                className="detail-cover-input"
+                type="file"
+                accept="image/*"
+                onChange={handleCoverSelected}
+              />
+            </>
+          )}
+        </div>
         <div className="detail-info">
           <div className="detail-type">{t('albums.typeLabel')}</div>
           <div className="detail-title">{album.title}</div>

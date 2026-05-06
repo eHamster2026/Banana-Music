@@ -175,6 +175,9 @@
     "saved": "Saved",
     "addToLiked": "Added to saved",
     "removeFromLiked": "Removed from saved",
+    "uploadCover": "Upload cover",
+    "coverUpdated": "Cover updated",
+    "coverUpdateFailed": "Cover upload failed",
     "likeFailed": "Action failed"
   },
   "artists": {

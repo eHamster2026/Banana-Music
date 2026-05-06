@@ -810,4 +810,23 @@ x_banana.include_router(admin.router)
 x_banana.include_router(plugins_router.router)
 x_banana.include_router(queue_router.router)
 
+
+@x_banana.put("/albums/{album_id}/cover", response_model=schemas.AlbumOut)
+def update_album_cover(
+    album_id: int,
+    req: schemas.AlbumCoverUpdate,
+    db: Session = Depends(get_db),
+    _user: models.User = Depends(get_current_user),
+):
+    cover_path = upload._cover_path_from_id(req.cover_id)
+    album = db.query(models.Album).filter(models.Album.id == album_id).first()
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+
+    album.cover_path = cover_path
+    db.commit()
+    db.refresh(album)
+    return album
+
+
 router.include_router(x_banana)

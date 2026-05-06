@@ -175,6 +175,9 @@
     "saved": "已收藏",
     "addToLiked": "已添加到收藏",
     "removeFromLiked": "已取消收藏",
+    "uploadCover": "上传封面",
+    "coverUpdated": "封面已更新",
+    "coverUpdateFailed": "封面上传失败",
     "likeFailed": "操作失败"
   },
   "artists": {
