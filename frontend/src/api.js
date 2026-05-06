@@ -46,6 +46,33 @@ export function getUploadStatus(jobId, token) {
   return apiFetch(`/rest/x-banana/tracks/upload-status/${jobId}`, {}, token)
 }
 
+export function existsByAudioHash(audioHash, token) {
+  return apiFetch(`/rest/x-banana/tracks/exists-by-hash?audio_hash=${encodeURIComponent(audioHash)}`, {}, token)
+}
+
+export function uploadCoverImage(blob, token) {
+  const form = new FormData()
+  form.append('file', blob, 'cover')
+  return fetch(API + '/rest/x-banana/tracks/covers/upload', {
+    method: 'POST',
+    body: form,
+    headers: token ? { Authorization: 'Bearer ' + token } : {},
+  }).then(async r => {
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}))
+      throw new Error(err.detail || 'HTTP ' + r.status)
+    }
+    return r.json()
+  })
+}
+
+export function parseUploadMetadata(body, token, pluginId = 'llm-metadata') {
+  return apiFetch(`/rest/x-banana/plugins/${encodeURIComponent(pluginId)}/parse-metadata`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  }, token)
+}
+
 /**
  * 轮询上传任务直到完成（state=done 或 error）。
  * @param {string} jobId
@@ -96,8 +123,8 @@ export async function allSettledWithConcurrency(items, concurrency, worker) {
 }
 
 /**
- * 根据 file_key 写库。服务端自动解析 Mutagen 标签作为初始元数据，
- * 并 fire-and-forget 后台任务（指纹计算、LLM 标签清洗）。
+ * 根据 file_key 写库。元数据由客户端解析/清洗后提交；
+ * 服务端只读取上传暂存中的 audio_hash / duration。
  * 返回 {status, track_id, title, artist, artists}
  */
 export function createTrack(body, token) {

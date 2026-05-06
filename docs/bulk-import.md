@@ -1,6 +1,6 @@
 # 批量导入指南
 
-本文档介绍如何使用 `scripts/bulk_import.py` 在导入前完成格式转换与元数据清洗，以及大量导入时如何通过上传参数控制服务端的 `parse_upload` 清洗。
+本文档介绍如何使用 `scripts/bulk_import.py` 在导入前完成格式转换与元数据清洗，并将清洗后的元数据随上传请求提交给服务端。
 
 ---
 
@@ -144,7 +144,7 @@ POST /rest/x-banana/tracks/upload-file
 → POST /rest/x-banana/tracks/create
 ```
 
-`upload` 会在本地先计算与服务端一致的 `audio_hash`，调用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=...` 查询是否重复；命中时返回已有 `track_id/title` 并跳过上传。未命中时才执行 Ollama 清洗，清洗成功后上传并创建曲目。这样重复文件不会消耗 LLM 推理。脚本本地清洗成功时会自动关闭本次服务端 `parse_upload`，避免同一首歌重复调用 Ollama。
+`upload` 会在本地先计算与服务端一致的 `audio_hash`，调用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=...` 查询是否重复；命中时返回已有 `track_id/title` 并跳过上传。未命中时才执行 Ollama 清洗，清洗成功后上传并创建曲目。这样重复文件不会消耗 LLM 推理。
 
 默认遇到重复内容时不会修改服务器已有曲目。若明确传 `--overwrite-duplicates`，脚本会在查重命中后**不重新上传音频**，而是用本地 LLM 清洗结果（失败时退回文件内嵌标签）调用管理员接口覆盖已有曲目的标题、主艺人、专辑和音轨号。该参数需要管理员账号或管理员 API Key。
 
@@ -158,8 +158,7 @@ BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload ./processed/*.flac
 python scripts/bulk_import.py upload ./processed/*.flac \
   --base-url http://localhost:8000 \
   --api-key am_xxx \
-  --job-timeout 180 \
-  --no-parse-metadata
+  --job-timeout 180
 
 # 导入 m3u8，上传引用歌曲并创建同名歌单
 BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload ./playlists/favorites.m3u8 \
@@ -174,18 +173,9 @@ BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload ./playlists/favorites
 
 ---
 
-## 3. 为什么批量导入时建议跳过服务端清洗
+## 3. 服务端不再排队清洗上传标签
 
-Banana Music 服务端默认会在每首曲目入库后将 LLM 清洗任务写入 `parse_upload_tasks` 表，由 `parse_upload_worker` 异步消费。这在日常少量上传时运转良好，但**批量导入时建议用 `--no-parse-metadata` 跳过这一步**，原因如下：
-
-**队列积压与超时**
-: `parse_upload_worker` 默认限制单并发（`max_concurrent: 1`），因为 Ollama 等本地 LLM 通常为单路排队处理。批量上传数百首时，队列深度超过 Ollama 的 `timeout_sec`（默认 120 秒），导致大量任务超时失败并被反复重试。
-
-**与预处理脚本重复**
-: 若已通过 `bulk_import.py process` 完成了 LLM 清洗并写入待上传副本，服务端再次调用 Ollama 清洗完全是冗余工作——既浪费 LLM 资源，又可能用质量相近的结果覆盖已经整理好的标签。
-
-**影响服务响应**
-: 大量 LLM 任务并发时会占满 Ollama 的推理资源，导致其他功能（如指纹查询、搜索建议）响应变慢。
+Banana Music 服务端不再在入库后创建 `parse_upload_tasks` 队列任务。上传请求必须在调用 `create` 时提交已经解析/清洗后的 `metadata`；前端通过 `/rest/x-banana/plugins/llm-metadata/parse-metadata` 同步调用 LLM，批量脚本则继续在本地预处理阶段完成清洗。
 
 ---
 
@@ -201,8 +191,8 @@ scripts/bulk_import.py process  ← 格式转换；若不直接上传，则 LLM 
 processed/ 目录            ← 标签整洁、格式统一的 FLAC / MP3
       │
       ▼
-scripts/bulk_import.py upload --no-parse-metadata
-或 process --upload --no-parse-metadata
+scripts/bulk_import.py upload
+或 process --upload
       │
       ▼
 脚本先按 audio_hash 查询服务端；非重复再清洗、上传并入库
@@ -219,24 +209,21 @@ scripts/bulk_import.py upload --no-parse-metadata
      --ollama-url http://localhost:11434
    ```
 
-2. **批量上传**：将 `processed/` 中的文件上传至服务，并通过 `--no-parse-metadata` 跳过服务端清洗
+2. **批量上传**：将 `processed/` 中的文件上传至服务
 
    ```bash
    BANANA_API_KEY=am_xxx python scripts/bulk_import.py upload /music/processed/*.flac \
-     --base-url http://localhost:8000 \
-     --no-parse-metadata
+     --base-url http://localhost:8000
    ```
 
    也可以在第 1 步直接加 `--upload`，预处理完成后立即上传最终文件。
 
-## 5. 如何通过参数控制服务端清洗
+## 5. 重复处理与上传参数
 
 `bulk_import.py upload` 和 `bulk_import.py process --upload` 都支持同一组上传参数：
 
 | 参数 | 传给后端的值 | 行为 |
 |------|--------------|------|
-| `--parse-metadata` | `parse_metadata: true` | 入库后继续入队服务端 `parse_upload` 清洗；仅在脚本跳过本地 LLM 时生效。 |
-| `--no-parse-metadata` | `parse_metadata: false` | 不入队服务端 `parse_upload`。脚本本地 LLM 成功时会自动使用该行为。 |
 | `--overwrite-duplicates` | 不上传重复音频；额外调用管理员更新接口 | 内容重复时，用本地元数据覆盖服务器已有曲目的标题、主艺人、专辑和音轨号；默认关闭。 |
 
 推荐批量导入命令：
@@ -244,9 +231,6 @@ scripts/bulk_import.py upload --no-parse-metadata
 ```bash
 BANANA_API_KEY=am_xxx python scripts/bulk_import.py process /music/inbox/*.ape \
   --upload \
-  --no-parse-metadata \
   --base-url http://localhost:8000 \
   --ollama-url http://localhost:11434
 ```
-
-这个参数是逐次请求生效的，不需要禁用 `llm-metadata` 插件，也不需要重启服务端。日常前端上传仍按默认行为继续执行服务端清洗。

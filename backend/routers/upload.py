@@ -4,16 +4,13 @@ routers/upload.py
 三步上传 API：
   POST /tracks/upload-file            — 存文件 → 入队 → 立即返回 {job_id}
   GET  /tracks/upload-status/{job_id} — 轮询任务状态（pending/processing/done/error）
-  POST /tracks/create                 — asyncio.Lock 串行写库 + 入队 parse_upload_tasks（指纹/LLM 清洗）
+  POST /tracks/create                 — asyncio.Lock 串行写库 + 入队指纹任务
 
 后台任务：
   upload_worker()        — 消费上传队列：线程池转码/hash + PCM 查重 + 写 UploadStaging
-  parse_upload_worker()  — 消费 parse_upload_tasks DB 表，运行 LLM 清洗（持久化，重启恢复）
   fingerprint_worker()   — 空闲时批量计算 Chromaprint + 定期清理过期记录
 """
 
-import base64
-import json
 import re
 import os
 import hashlib
@@ -58,17 +55,11 @@ ART_COLORS = [
     "art-7", "art-8", "art-9", "art-10", "art-11", "art-12",
 ]
 
-_SEP = r"[—–\-]"
-_PATTERN = re.compile(r"^(\d+)\.(.*?)" + _SEP + r"(.+)$")
-
 # 专用线程池：无论配置值多大，仍至少为播放/数据库保留 1 个 CPU 核
 _cpu_count = os.cpu_count() or 1
 _upload_worker_limit = max(1, _cpu_count - 1)
 _upload_num_workers  = max(1, min(settings.upload_max_workers, _upload_worker_limit))
 _executor = ThreadPoolExecutor(max_workers=_upload_num_workers)
-_metadata_worker_limit = min(4, max(1, _cpu_count // 2))
-_metadata_executor = ThreadPoolExecutor(max_workers=_metadata_worker_limit)
-_METADATA_PARSE_TIMEOUT_SEC = 10.0
 
 # ── 上传任务队列 ──────────────────────────────────────────────
 
@@ -212,13 +203,7 @@ async def upload_worker() -> None:
         finally:
             queue.task_done()
 
-# ── 元数据解析 ────────────────────────────────────────────────
-
-def _parse_filename(stem: str):
-    m = _PATTERN.match(stem)
-    if m:
-        return int(m.group(1)), m.group(2).strip(), m.group(3).strip()
-    return None
+# ── 客户端元数据归一化 / 封面持久化 ───────────────────────────
 
 
 def _clean_text(value) -> str | None:
@@ -234,22 +219,6 @@ def _clean_text(value) -> str | None:
         value = value.decode("utf-8", errors="ignore")
     text = str(value).strip()
     return text or None
-
-
-def _parse_track_number(value) -> int:
-    if isinstance(value, (list, tuple)) and value:
-        first = value[0]
-        if isinstance(first, (list, tuple)) and first:
-            value = first[0]
-        else:
-            value = first
-    text = _clean_text(value)
-    if not text:
-        return 0
-    try:
-        return int(text.split("/", 1)[0])
-    except Exception:
-        return 0
 
 
 def _detect_cover_ext(data: bytes, mime: str | None = None) -> str:
@@ -278,215 +247,6 @@ def _detect_cover_ext(data: bytes, mime: str | None = None) -> str:
     return ".jpg"
 
 
-def _safe_tag_get(tags, key):
-    if tags is None or not hasattr(tags, "get"):
-        return None
-    try:
-        return tags.get(key)
-    except Exception:
-        return None
-
-
-def _extract_embedded_cover(audio) -> tuple[bytes | None, str | None]:
-    if audio is None:
-        return None, None
-
-    pictures = getattr(audio, "pictures", None) or []
-    for pic in pictures:
-        data = getattr(pic, "data", None)
-        if data:
-            return data, getattr(pic, "mime", None)
-
-    tags = getattr(audio, "tags", None)
-    if tags is None:
-        return None, None
-
-    getall = getattr(tags, "getall", None)
-    if callable(getall):
-        for frame in tags.getall("APIC"):
-            data = getattr(frame, "data", None)
-            if data:
-                return data, getattr(frame, "mime", None)
-
-    if hasattr(tags, "get"):
-        for key in ("covr",):
-            covers = _safe_tag_get(tags, key) or []
-            for cover in covers:
-                data = bytes(cover)
-                if data:
-                    return data, getattr(cover, "imageformat", None)
-
-        for key in ("METADATA_BLOCK_PICTURE", "metadata_block_picture", "COVERART"):
-            values = _safe_tag_get(tags, key) or []
-            for raw in values:
-                try:
-                    from mutagen.flac import Picture
-
-                    pic = Picture(base64.b64decode(raw))
-                    if pic.data:
-                        return pic.data, pic.mime
-                except Exception:
-                    continue
-
-    return None, None
-
-
-def _extract_embedded_lyrics(audio) -> str | None:
-    if audio is None:
-        return None
-
-    tags = getattr(audio, "tags", None)
-    if tags is None:
-        return None
-
-    getall = getattr(tags, "getall", None)
-    if callable(getall):
-        for frame in tags.getall("USLT"):
-            text = getattr(frame, "text", None)
-            if isinstance(text, list):
-                joined = "\n".join(part for part in (str(x).strip() for x in text) if part)
-                if joined:
-                    return joined
-            cleaned = _clean_text(text)
-            if cleaned:
-                return cleaned
-
-    if hasattr(tags, "get"):
-        for key in (
-            "lyrics",
-            "LYRICS",
-            "unsyncedlyrics",
-            "UNSYNCEDLYRICS",
-            "\xa9lyr",
-            "----:com.apple.iTunes:LYRICS",
-        ):
-            cleaned = _clean_text(_safe_tag_get(tags, key))
-            if cleaned:
-                return cleaned
-
-    return None
-
-
-def _merge_tag_parsed(pre: dict | None, post: dict | None) -> dict | None:
-    """
-    无损转码（APE/WAV/WMA → FLAC）后，ffmpeg 输出的 FLAC 往往只带部分标签。
-    以转码前在源文件上解析的结果为主，用转码后解析结果仅填补空缺字段。
-    """
-    if not pre and not post:
-        return None
-    if not pre:
-        return post
-    if not post:
-        return pre
-    out = dict(pre)
-    for key in ("track_number", "title", "artist", "album", "release_date", "album_artist", "lyrics", "artists"):
-        if key == "track_number":
-            if not out.get("track_number") and post.get("track_number"):
-                out["track_number"] = post["track_number"]
-        elif key == "artists":
-            if not out.get("artists") and post.get("artists"):
-                out["artists"] = post["artists"]
-        else:
-            if not out.get(key) and post.get(key):
-                out[key] = post[key]
-    if not out.get("cover_data") and post.get("cover_data"):
-        out["cover_data"] = post["cover_data"]
-        out["cover_ext"] = post.get("cover_ext")
-    return out
-
-
-def _parse_tags(filepath: Path):
-    try:
-        from mutagen import File as MFile
-        audio = None
-        easy_audio = None
-        try:
-            easy_audio = MFile(str(filepath), easy=True)
-        except Exception:
-            pass
-        try:
-            audio = MFile(str(filepath))
-        except Exception:
-            pass
-        if easy_audio is None:
-            with open(filepath, "rb") as fh:
-                easy_audio = MFile(fh, easy=True)
-        if audio is None:
-            with open(filepath, "rb") as fh:
-                audio = MFile(fh)
-        if not easy_audio and not audio:
-            return None
-
-        title = _clean_text((easy_audio.get("title") or [None])[0]) if easy_audio else None
-        album = _clean_text((easy_audio.get("album") or [None])[0]) if easy_audio else None
-        date = _clean_text((easy_audio.get("date") or [None])[0]) if easy_audio else None
-        albumartist_values: list[str] = []
-        if easy_audio and easy_audio.get("albumartist") is not None:
-            raw_albumartist = easy_audio.get("albumartist")
-            if isinstance(raw_albumartist, (list, tuple)):
-                for x in raw_albumartist:
-                    c = _clean_text(x)
-                    if c:
-                        albumartist_values.append(c)
-            else:
-                c = _clean_text(raw_albumartist)
-                if c:
-                    albumartist_values.append(c)
-        albumartist = albumartist_values[0] if albumartist_values else None
-        tn = _parse_track_number((easy_audio.get("tracknumber") or [None])[0]) if easy_audio else 0
-
-        artists_list: list[str] = []
-        if easy_audio and easy_audio.get("artist") is not None:
-            raw_art = easy_audio.get("artist")
-            if isinstance(raw_art, (list, tuple)):
-                for x in raw_art:
-                    c = _clean_text(x)
-                    if c:
-                        artists_list.append(c)
-            else:
-                c = _clean_text(raw_art)
-                if c:
-                    artists_list.append(c)
-        artists_list = dedupe_artist_names(artists_list)
-        artist = artists_list[0] if artists_list else None
-        raw_text_tags: dict[str, str | list[str]] = {}
-        if easy_audio:
-            for key in sorted(easy_audio.keys()):
-                raw_value = easy_audio.get(key)
-                values: list[str] = []
-                if isinstance(raw_value, (list, tuple)):
-                    for x in raw_value:
-                        c = _clean_text(x)
-                        if c:
-                            values.append(c)
-                else:
-                    c = _clean_text(raw_value)
-                    if c:
-                        values.append(c)
-                if values:
-                    raw_text_tags[str(key)] = values if len(values) > 1 else values[0]
-
-        if title and artist:
-            cover_data, cover_mime = _extract_embedded_cover(audio)
-            return {
-                "track_number": tn,
-                "title": title,
-                "artist": artist,
-                "artists": artists_list,
-                "album": album,
-                "release_date": str(date)[:10] if date else None,
-                "album_artist": albumartist,
-                "album_artists": albumartist_values,
-                "lyrics": _extract_embedded_lyrics(audio),
-                "raw_text_tags": raw_text_tags,
-                "cover_data": cover_data,
-                "cover_ext": _detect_cover_ext(cover_data, cover_mime) if cover_data else None,
-            }
-    except Exception:
-        pass
-    return None
-
-
 def _persist_cover(cover_data: bytes | None, cover_ext: str | None) -> str | None:
     if not cover_data:
         return None
@@ -497,19 +257,6 @@ def _persist_cover(cover_data: bytes | None, cover_ext: str | None) -> str | Non
     if not cover_path.exists():
         cover_path.write_bytes(cover_data)
     return filename
-
-
-def _apply_cover(tag_parsed: dict | None, album_obj: models.Album | None, track: models.Track) -> None:
-    if not tag_parsed:
-        return
-    filename = _persist_cover(tag_parsed.get("cover_data"), tag_parsed.get("cover_ext"))
-    if not filename:
-        return
-    if album_obj and not album_obj.cover_path:
-        album_obj.cover_path = filename
-        return
-    if not track.cover_path:
-        track.cover_path = filename
 
 
 def _get_duration(filepath: Path) -> int:
@@ -907,14 +654,11 @@ def _process_uploaded_file_sync(
     Run in thread pool (truly parallel across concurrent uploads):
     1. Lossless transcode → FLAC level-5 + ReplayGain（仅 APE/WAV/WMA；上传的 FLAC 不重编码）
     2. PCM hash (format-agnostic dedup)
-    3. Duration + tag parsing on the final (possibly converted) file
+    3. Duration on the final (possibly converted) file
     Fingerprinting is deferred to the background idle worker.
     """
     suffix     = save_path.suffix.lower()
     final_path = save_path
-    # 转码前从源文件解析的标签，避免 ffmpeg 输出的 FLAC 缺字段（APE/WAV/WMA）。
-    # 上传的 .flac 不再重编码，直接保留原文件（封面与标签完整）。
-    tag_pre: dict | None = None
 
     if suffix in LOSSLESS_EXTS:
         # WMA requires a codec probe; all other lossless exts are always eligible
@@ -923,11 +667,6 @@ def _process_uploaded_file_sync(
         # .flac：不重编码、不跑 ReplayGain，避免丢 Picture / 改动文件
         if do_convert and suffix != ".flac":
             # APE / WAV / WMA-lossless: must convert — cannot serve these natively.
-            # 在删除源文件前先读完整标签；转码后 FLAC 往往只有部分字段。
-            try:
-                tag_pre = _parse_tags(save_path)
-            except Exception:
-                tag_pre = None
             flac_path = save_path.with_suffix(".flac")
             if not flac_path.exists():
                 try:
@@ -944,16 +683,10 @@ def _process_uploaded_file_sync(
 
     audio_hash = _compute_audio_hash(final_path)
     duration   = _get_duration(final_path)
-    tag_parsed = _parse_tags(final_path)
-    if tag_pre is not None:
-        tag_parsed = _merge_tag_parsed(tag_pre, tag_parsed)
-    fn_parsed  = _parse_filename(Path(original_name).stem)
 
     return {
         "audio_hash":   audio_hash,
         "duration":     duration,
-        "tag_parsed":   tag_parsed,
-        "fn_parsed":    fn_parsed,
         "final_suffix": final_path.suffix,   # ".flac" when converted, original otherwise
     }
 
@@ -974,21 +707,18 @@ class CreateTrackMetadata(BaseModel):
 
 class CreateTrackRequest(BaseModel):
     file_key: str
-    parse_metadata: bool = Field(
-        True,
-        description="是否入队执行 parse_upload 元数据清洗；false 时仅使用文件内嵌标签写库",
-    )
     metadata: Optional[CreateTrackMetadata] = Field(
         None,
-        description="可选客户端已清洗元数据；用于 bulk_import 等批量导入场景，优先于文件内嵌标签",
+        description="客户端解析/清洗后的元数据；后端不再解析音频标签",
     )
+    cover_id: Optional[str] = Field(None, description="通过 /tracks/covers/upload 上传得到的封面 ID")
     # audio_hash / duration_sec 等均从上传缓存读取，客户端不可提交。
 
 
-def _apply_metadata_override(tag: dict, metadata: CreateTrackMetadata | None) -> dict:
+def _metadata_to_tag_dict(metadata: CreateTrackMetadata | None) -> dict:
     if metadata is None:
-        return tag
-    out = dict(tag)
+        return {}
+    out: dict = {}
     data = metadata.model_dump(exclude_none=True)
 
     def cleaned(value) -> str | None:
@@ -1035,37 +765,15 @@ def _apply_metadata_override(tag: dict, metadata: CreateTrackMetadata | None) ->
     return out
 
 
-async def _parse_tags_for_create(save_path: Path) -> dict:
-    """
-    Parse create-time tags without competing with upload transcode/hash workers.
-
-    Tests call FastAPI through ASGITransport; running this tiny parser
-    synchronously in BANANA_TESTING avoids an executor wake-up deadlock observed
-    in that harness while keeping production on a dedicated metadata executor.
-    """
-    if settings.banana_testing:
-        try:
-            return _parse_tags(save_path) or {}
-        except Exception:
-            logger.warning("create_track 标签解析失败: path=%s", save_path.name, exc_info=True)
-            return {}
-
-    loop = asyncio.get_running_loop()
-    try:
-        tag = await asyncio.wait_for(
-            loop.run_in_executor(_metadata_executor, _parse_tags, save_path),
-            timeout=_METADATA_PARSE_TIMEOUT_SEC,
-        )
-        return tag or {}
-    except asyncio.TimeoutError:
-        logger.warning(
-            "create_track 标签解析超时: path=%s timeout=%.1fs",
-            save_path.name,
-            _METADATA_PARSE_TIMEOUT_SEC,
-        )
-    except Exception:
-        logger.warning("create_track 标签解析失败: path=%s", save_path.name, exc_info=True)
-    return {}
+def _cover_path_from_id(cover_id: str | None) -> str | None:
+    if not cover_id:
+        return None
+    value = cover_id.strip()
+    if not re.fullmatch(r"[0-9a-f]{64}\.(?:jpg|jpeg|png|webp|gif)", value):
+        raise HTTPException(400, "cover_id 无效")
+    if not (COVER_DIR / value).exists():
+        raise HTTPException(404, "封面不存在或已过期")
+    return value
 
 
 # ── 端点 ──────────────────────────────────────────────────────
@@ -1091,6 +799,31 @@ async def exists_by_hash(
         return {"exists": True, "track_id": track.id, "title": track.title}
     finally:
         db.close()
+
+
+@router.post("/covers/upload")
+async def upload_cover_endpoint(file: UploadFile = File(...)):
+    """
+    上传前端从音频文件中解析出的封面图片，返回 create 可引用的 cover_id。
+    后端只验证并持久化图片，不解析音频文件。
+    """
+    content_type = (file.content_type or "").lower()
+    data = await file.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(413, "封面文件过大")
+    if not data:
+        raise HTTPException(400, "封面文件为空")
+
+    ext = _detect_cover_ext(data, content_type)
+    if ext not in {".jpg", ".png", ".webp", ".gif"}:
+        raise HTTPException(400, "不支持的封面格式")
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(400, "封面必须是图片")
+
+    cover_id = _persist_cover(data, ext)
+    if not cover_id:
+        raise HTTPException(500, "封面保存失败")
+    return {"cover_id": cover_id, "cover_url": f"/covers/{cover_id}"}
 
 
 @router.post("/upload-file")
@@ -1160,85 +893,6 @@ async def upload_status(job_id: str):
     return {"state": "error", "detail": job.error_detail or "未知错误"}
 
 
-def enqueue_parse_upload_task(
-    db: Session, track_id: int, filename_stem: str, raw_tags: dict | None
-) -> None:
-    """
-    在 DB 写锁内（与 create_track 同一事务）写入 parse_upload_tasks 表。
-    parse_upload_worker 轮询该表并运行 LLM 清洗；服务重启后任务自动恢复。
-    bytes 字段（cover_data 等）无法 JSON 序列化，写入前过滤。
-    """
-    safe_tags = (
-        {k: v for k, v in raw_tags.items() if not isinstance(v, (bytes, bytearray))}
-        if raw_tags else {}
-    )
-    db.merge(models.ParseUploadTask(
-        track_id=track_id,
-        filename_stem=filename_stem,
-        raw_tags=json.dumps(safe_tags, ensure_ascii=False) if safe_tags else None,
-    ))
-
-
-async def parse_upload_worker() -> None:
-    """
-    轮询 parse_upload_tasks 表，每次处理一条任务，运行 LLM 标签清洗。
-    max_concurrent=1 与 pipeline 信号量一致（Ollama 顺序处理，无意义并发）。
-    服务重启后，表中残留的未完成任务自动被拾取。
-    """
-    while True:
-        await asyncio.sleep(3)
-        if settings.banana_testing:
-            continue
-        try:
-            await _parse_upload_batch()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            _app_log.warning("parse_upload_worker 批次异常", exc_info=True)
-
-
-async def _parse_upload_batch() -> None:
-    """取队首任务，运行清洗，成功或无结果均删除任务；异常时保留供下次重试。"""
-    db = SessionLocal()
-    task: models.ParseUploadTask | None = None
-    try:
-        task = (
-            db.query(models.ParseUploadTask)
-            .order_by(models.ParseUploadTask.id)
-            .first()
-        )
-        if task is None:
-            return
-
-        track_id      = task.track_id
-        filename_stem = task.filename_stem
-        raw_tags      = json.loads(task.raw_tags) if task.raw_tags else None
-
-        from services.upload_metadata_enrich import try_enrich_track_from_parse_upload
-        await try_enrich_track_from_parse_upload(db, track_id, filename_stem, raw_tags)
-        db.commit()
-
-        # 清洗完成（有结果或 LLM 无结果均属正常终态）→ 删除任务
-        db.delete(task)
-        db.commit()
-        task = None   # 标记已删，finally 不再重复删
-
-    except asyncio.CancelledError:
-        raise
-    except Exception:
-        _app_log.warning(
-            "_parse_upload_batch 清洗失败 track_id=%s，任务保留待重试",
-            task.track_id if task else "?",
-            exc_info=True,
-        )
-        try:
-            db.rollback()
-        except Exception:
-            pass
-    finally:
-        db.close()
-
-
 @router.post("/create")
 async def create_track(req: CreateTrackRequest):
     db = SessionLocal()
@@ -1254,11 +908,9 @@ async def _create_track_in_db(req: CreateTrackRequest, db: Session):
 
     流程：
     1. 从 upload_staging 表读取 audio_hash / 时长 / 原始文件名
-    2. 对落盘文件重跑 Mutagen 解析标签（快，< 50 ms）
+    2. 使用客户端提交的 metadata 写入初始曲目信息
     3. asyncio.Lock 串行化 DB 写入（SQLite 单写者 / 竞态安全）
-    4. 同一事务写入：
-       - fingerprint_tasks（Chromaprint 计算队列）
-       - parse_upload_tasks（LLM 清洗队列，持久化，重启后自动恢复）
+    4. 同一事务写入 fingerprint_tasks（Chromaprint 计算队列）
     """
     # ── 前置检查 ──────────────────────────────────────────────
     staging = db.get(models.UploadStaging, req.file_key)
@@ -1274,12 +926,8 @@ async def _create_track_in_db(req: CreateTrackRequest, db: Session):
     if audio_hash_bytes is None:
         raise HTTPException(500, "上传记录缺少 audio_hash，请重新上传")
     duration:         int          = staging.duration_sec or 0
-    original_name:    str          = staging.original_name
-    filename_stem:    str          = Path(original_name).stem
-
-    # ── 快速重解析 Mutagen 标签 ────────────────────────────────
-    tag = await _parse_tags_for_create(save_path)
-    tag = _apply_metadata_override(tag, req.metadata)
+    tag = _metadata_to_tag_dict(req.metadata)
+    cover_path = _cover_path_from_id(req.cover_id)
 
     # 无内嵌标题时不杜撰：不用文件名顶替（界面用 track id 占位）
     title        = _clean_text(tag.get("title")) or ""
@@ -1327,15 +975,17 @@ async def _create_track_in_db(req: CreateTrackRequest, db: Session):
             audio_hash=audio_hash_bytes,
             audio_fingerprint=None,   # 由后台指纹任务填充
         )
-        _apply_cover(tag, album_obj, track)
+        if cover_path:
+            if album_obj and not album_obj.cover_path:
+                album_obj.cover_path = cover_path
+            else:
+                track.cover_path = cover_path
         db.add(track)
         db.delete(staging)   # 消费暂存记录
         try:
             db.flush()
             add_track_featured_artists(db, track.id, names, _get_or_create_artist)
             enqueue_fingerprint_task(db, track.id)
-            if req.parse_metadata:
-                enqueue_parse_upload_task(db, track.id, filename_stem, tag or None)
             db.commit()
             db.refresh(track)
         except Exception:

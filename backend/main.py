@@ -17,7 +17,7 @@ REACT_DIST   = FRONTEND_DIR / "frontend" / "dist"
 DATA_DIR     = FRONTEND_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-SCHEMA_DESCRIPTION = "tracks 移除 file_hash；上传与去重统一使用 audio_hash"
+SCHEMA_DESCRIPTION = "移除 parse_upload_tasks；上传元数据由客户端解析并同步提交"
 
 # ── Schema 版本检查 ────────────────────────────────────────────
 # 版本历史存储在 schema_migrations 表，避免文件与数据库不一致。
@@ -103,13 +103,11 @@ async def lifespan(app: FastAPI):
     ]
     # 启动后台指纹任务
     fp_task = asyncio.create_task(upload.fingerprint_worker())
-    # 启动 parse_upload 清洗 worker（DB 持久化队列，重启后自动恢复）
-    pu_task = asyncio.create_task(upload.parse_upload_worker())
     yield
     # 关闭时取消所有后台任务
-    for t in upload_tasks + [fp_task, pu_task]:
+    for t in upload_tasks + [fp_task]:
         t.cancel()
-    await asyncio.gather(*upload_tasks, fp_task, pu_task, return_exceptions=True)
+    await asyncio.gather(*upload_tasks, fp_task, return_exceptions=True)
 
 
 app = FastAPI(title="Apple Music Demo API", description="Apple Music 主页 Demo 后端", version="1.0.0", lifespan=lifespan)

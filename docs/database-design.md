@@ -152,21 +152,13 @@ CREATE TABLE fingerprint_tasks (
   created_at INTEGER
 );
 
--- ── 上传：暂存（upload-file → create）与 parse_upload 任务队列 ───
+-- ── 上传：暂存（upload-file → create）───────────────────────
 CREATE TABLE upload_staging (
   file_key      VARCHAR NOT NULL PRIMARY KEY,
   audio_hash    BLOB NOT NULL, -- PCM MD5，16 字节
   original_name VARCHAR NOT NULL,
   duration_sec  INTEGER,
   created_at    INTEGER
-);
-
-CREATE TABLE parse_upload_tasks (
-  id             INTEGER NOT NULL PRIMARY KEY,
-  track_id       INTEGER NOT NULL UNIQUE REFERENCES tracks (id) ON DELETE CASCADE,
-  filename_stem  VARCHAR(500) NOT NULL,
-  raw_tags       TEXT,
-  created_at     INTEGER
 );
 
 CREATE TABLE banners (
@@ -206,8 +198,6 @@ CREATE INDEX ix_play_history_id ON play_history (id);
 
 CREATE INDEX ix_fingerprint_tasks_id ON fingerprint_tasks (id);
 
-CREATE INDEX ix_parse_upload_tasks_id ON parse_upload_tasks (id);
-
 CREATE INDEX ix_banners_id ON banners (id);
 ```
 
@@ -229,5 +219,13 @@ CREATE INDEX ix_banners_id ON banners (id);
 | `play_queues.updated_at` | v0.11 由 FLOAT 改为 INTEGER Unix 秒；`position_sec` 为播放进度保持 FLOAT。老库需手动执行 `CAST(ROUND(updated_at) AS INTEGER)` 迁移。 |
 | `user_library_*.added_at` | v0.11 移除；列表排序改为按主键 id 降序。旧库如仍保留该列，需手动迁移，ORM 会忽略它。 |
 | 测试库 | `BANANA_TESTING=true` 时使用内存 SQLite，不写入 `schema_migrations`。 |
+
+v18 手动迁移示例：
+
+```sql
+DROP TABLE IF EXISTS parse_upload_tasks;
+INSERT OR IGNORE INTO schema_migrations (version, applied_at, description)
+VALUES (18, strftime('%s','now'), '移除 parse_upload_tasks；上传元数据由客户端解析并同步提交');
+```
 
 **维护**：改表结构时先改 `models.py`、递增 `SCHEMA_VERSION` 并准备人工迁移方案，再更新本节 SQL（可用仓库内 `uv run python` 调用 `CreateTable`/`CreateIndex` 对 `Base.metadata` 重新导出校对）。

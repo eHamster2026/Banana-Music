@@ -189,7 +189,7 @@ timeout = float(self.ctx.config.get("timeout_sec", 30))
 
 | stage_id | 触发时机 | 默认策略 | 典型插件 |
 |----------|----------|----------|----------|
-| `parse_upload` | 文件上传后、写库前（异步，不阻塞响应） | first — 取第一个非 None 结果 | llm-metadata |
+| `parse_upload` | 前端上传入库前通过 `/rest/x-banana/plugins/{plugin_id}/parse-metadata` 同步调用 | first — 取第一个非 None 结果 | llm-metadata |
 | `fingerprint_lookup` | Chromaprint 指纹写入后 | best — 并行查询，取最高置信度 | musicbrainz |
 | `info_lookup` | 同上（默认 disabled） | best | musicbrainz |
 
@@ -199,7 +199,7 @@ timeout = float(self.ctx.config.get("timeout_sec", 30))
 async def parse_upload(
     self,
     filename_stem: str,          # 文件名（不含扩展名），如 "01 - Artist - Song"
-    raw_tags: Optional[TagDict], # Mutagen 解析的标签，可为 None（无嵌入标签）
+    raw_tags: Optional[TagDict], # 客户端解析出的标签，可为 None（无嵌入标签）
 ) -> Optional[MetadataResult]:
     ...
     return MetadataResult(title="Song", artists=["Artist"], confidence=0.9)

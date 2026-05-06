@@ -24,14 +24,6 @@ def _stage_upload(file_key: str, tmp_path):
         db.close()
 
 
-def _parse_task_count() -> int:
-    db = SessionLocal()
-    try:
-        return db.query(models.ParseUploadTask).count()
-    finally:
-        db.close()
-
-
 def _create_track_with_hash(audio_hash: bytes, title: str = "Existing Title") -> int:
     db = SessionLocal()
     try:
@@ -97,54 +89,85 @@ async def test_exists_by_hash_rejects_invalid_hash(client):
 
 
 @pytest.mark.asyncio
-async def test_create_track_parse_metadata_false_skips_parse_upload_task(
+async def test_upload_cover_and_create_track_uses_cover_id(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
+    monkeypatch.setattr(upload, "COVER_DIR", tmp_path / "covers")
+    file_key = "e" * 64 + ".flac"
+    _stage_upload(file_key, tmp_path)
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\0" * 16
+    cover = await client.post(
+        "/rest/x-banana/tracks/covers/upload",
+        files={"file": ("cover.png", png, "image/png")},
+    )
+
+    assert cover.status_code == 200
+    cover_id = cover.json()["cover_id"]
+
+    created = await client.post(
+        "/rest/x-banana/tracks/create",
+        json={
+            "file_key": file_key,
+            "cover_id": cover_id,
+            "metadata": {
+                "title": "Covered",
+                "artists": ["Cover Artist"],
+                "album": "Cover Album",
+            },
+        },
+    )
+
+    assert created.status_code == 200
+    db = SessionLocal()
+    try:
+        track = db.get(models.Track, created.json()["track_id"])
+        assert track.album.cover_path == cover_id
+    finally:
+        db.close()
+
+
+@pytest.mark.asyncio
+async def test_create_track_uses_client_metadata(
     client, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
-    monkeypatch.setattr(
-        upload, "_parse_tags", lambda _path: {"title": "Title", "artist": "Artist"}
-    )
     file_key = "a" * 64 + ".flac"
     _stage_upload(file_key, tmp_path)
 
     r = await client.post(
         "/rest/x-banana/tracks/create",
-        json={"file_key": file_key, "parse_metadata": False},
+        json={"file_key": file_key, "metadata": {"title": "Title", "artists": ["Artist"]}},
     )
 
     assert r.status_code == 200
-    assert r.json()["status"] == "added"
-    assert _parse_task_count() == 0
+    body = r.json()
+    assert body["status"] == "added"
+    assert body["title"] == "Title"
+    assert body["artists"] == ["Artist"]
 
 
 @pytest.mark.asyncio
-async def test_create_track_parse_metadata_defaults_to_true(
+async def test_create_track_without_metadata_uses_unknown_artist(
     client, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
-    monkeypatch.setattr(
-        upload, "_parse_tags", lambda _path: {"title": "Title", "artist": "Artist"}
-    )
     file_key = "b" * 64 + ".flac"
     _stage_upload(file_key, tmp_path)
 
     r = await client.post("/rest/x-banana/tracks/create", json={"file_key": file_key})
 
     assert r.status_code == 200
-    assert r.json()["status"] == "added"
-    assert _parse_task_count() == 1
+    body = r.json()
+    assert body["status"] == "added"
+    assert body["title"] == ""
+    assert body["artists"] == ["未知艺人"]
 
 
 @pytest.mark.asyncio
-async def test_create_track_metadata_override_takes_precedence(
+async def test_create_track_metadata_writes_album_and_featured_artists(
     client, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
-    monkeypatch.setattr(
-        upload,
-        "_parse_tags",
-        lambda _path: {"title": "Raw Title", "artist": "Raw Artist"},
-    )
     file_key = "c" * 64 + ".mp3"
     _stage_upload(file_key, tmp_path)
 
@@ -152,7 +175,6 @@ async def test_create_track_metadata_override_takes_precedence(
         "/rest/x-banana/tracks/create",
         json={
             "file_key": file_key,
-            "parse_metadata": False,
             "metadata": {
                 "title": "Clean Title",
                 "artists": ["Clean Artist", "Guest Artist"],
@@ -181,15 +203,10 @@ async def test_create_track_metadata_override_takes_precedence(
 
 
 @pytest.mark.asyncio
-async def test_create_track_metadata_override_survives_tag_parse_failure(
+async def test_create_track_accepts_client_metadata_without_server_tag_parser(
     client, monkeypatch, tmp_path
 ):
     monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
-
-    def fail_parse(_path):
-        raise RuntimeError("parser unavailable")
-
-    monkeypatch.setattr(upload, "_parse_tags", fail_parse)
     file_key = "d" * 64 + ".mp3"
     _stage_upload(file_key, tmp_path)
 
@@ -197,7 +214,6 @@ async def test_create_track_metadata_override_survives_tag_parse_failure(
         "/rest/x-banana/tracks/create",
         json={
             "file_key": file_key,
-            "parse_metadata": False,
             "metadata": {
                 "title": "Client Title",
                 "artists": ["Client Artist"],

@@ -4,9 +4,31 @@ import {
   uploadSingleFile,
   pollUploadJob,
   createTrack,
+  existsByAudioHash,
+  uploadCoverImage,
+  parseUploadMetadata,
   displayTrackTitle,
 } from './api.js'
+import { coverToBlob, mergeMetadata, parseAudioFileMetadata } from './audioMetadata.js'
 import i18n from './i18n'
+
+function fileStem(file) {
+  return file.name.replace(/\.[^.]*$/, '')
+}
+
+function createMetadataPayload(metadata) {
+  const allowed = ['title', 'artist', 'artists', 'album', 'album_artist', 'album_artists', 'release_date', 'track_number', 'lyrics']
+  return Object.fromEntries(
+    allowed
+      .map(key => [key, metadata?.[key]])
+      .filter(([, value]) => {
+        if (value == null) return false
+        if (Array.isArray(value) && value.length === 0) return false
+        if (typeof value === 'string' && !value.trim()) return false
+        return true
+      })
+  )
+}
 
 export async function uploadLocalAudioFiles({
   files,
@@ -31,6 +53,48 @@ export async function uploadLocalAudioFiles({
       if (finished) return
       finished = true
       progress.finishFile({ ok, file })
+    }
+
+    let parsed
+    try {
+      parsed = await parseAudioFileMetadata(file)
+    } catch (err) {
+      showToast(i18n.t('upload.processFailedWithReason', {
+        name: file.name,
+        reason: err?.message || 'metadata parse failed',
+      }))
+      finish(false)
+      return
+    }
+
+    if (parsed.audio_hash) {
+      try {
+        const exists = await existsByAudioHash(parsed.audio_hash, token)
+        if (exists?.exists) {
+          showToast(i18n.t('upload.exists', { title: displayTrackTitle({ id: exists.track_id, title: exists.title }) }))
+          await onTrackResolved(exists.track_id)
+          finish(true)
+          return
+        }
+      } catch {
+        // 预检失败不阻止上传；服务端上传阶段仍会做权威查重。
+      }
+    }
+
+    let cleanedMetadata
+    try {
+      const llm = await parseUploadMetadata({
+        filename_stem: fileStem(file),
+        raw_tags: parsed.raw_tags || parsed.metadata || {},
+      }, token)
+      cleanedMetadata = createMetadataPayload(mergeMetadata(parsed.metadata, llm))
+    } catch (err) {
+      showToast(i18n.t('upload.processFailedWithReason', {
+        name: file.name,
+        reason: err?.message || 'metadata cleanup failed',
+      }))
+      finish(false)
+      return
     }
 
     let jobId
@@ -63,8 +127,25 @@ export async function uploadLocalAudioFiles({
       return
     }
 
+    let coverId = null
+    const coverBlob = coverToBlob(parsed.cover)
+    if (coverBlob) {
+      try {
+        const uploadedCover = await uploadCoverImage(coverBlob, token)
+        coverId = uploadedCover.cover_id || null
+      } catch {
+        showToast(i18n.t('upload.writeFailed', { name: file.name }))
+        finish(false)
+        return
+      }
+    }
+
     try {
-      const track = await createTrack({ file_key: uploadResult.file_key, parse_metadata: true }, token)
+      const track = await createTrack({
+        file_key: uploadResult.file_key,
+        metadata: cleanedMetadata,
+        ...(coverId ? { cover_id: coverId } : {}),
+      }, token)
 
       if (track.status === 'added' || track.status === 'duplicate') {
         showToast(

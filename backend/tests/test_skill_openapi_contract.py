@@ -27,14 +27,14 @@ def test_openapi_searchresult_includes_plugin_hits():
     assert "plugin_hits" in props, "SearchResult should expose plugin_hits for merged search"
 
 
-def test_openapi_create_track_accepts_parse_metadata_flag():
-    """Upload create accepts an opt-out flag for parse_upload metadata cleanup."""
+def test_openapi_create_track_uses_client_metadata_contract():
+    """Upload create accepts client metadata and no longer exposes server parse queue flag."""
     spec = app.openapi()
     schemas = spec.get("components", {}).get("schemas", {})
     req = schemas.get("CreateTrackRequest")
     assert req is not None
     props = req.get("properties", {})
     assert "file_key" in props
-    assert "parse_metadata" in props
     assert "metadata" in props
-    assert props["parse_metadata"].get("default") is True
+    assert "cover_id" in props
+    assert "parse_metadata" not in props

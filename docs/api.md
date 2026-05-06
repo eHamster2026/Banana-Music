@@ -175,12 +175,15 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 
 ### 上传
 
-三步异步上传流程：
+上传流程：
 
 ```text
-1. POST /rest/x-banana/tracks/upload-file       multipart: file
+1. GET  /rest/x-banana/tracks/exists-by-hash?audio_hash=<32位hex>  # 可选，客户端能计算时先查重
+2. POST /rest/x-banana/plugins/llm-metadata/parse-metadata         # 前端提交解析出的 raw_tags 做 LLM 清洗
+3. POST /rest/x-banana/tracks/upload-file       multipart: file
    GET  /rest/x-banana/tracks/upload-status/{job_id}
-2. POST /rest/x-banana/tracks/create            { "file_key": "...", "parse_metadata": true }
+4. POST /rest/x-banana/tracks/covers/upload     multipart: file      # 可选，先上传封面
+5. POST /rest/x-banana/tracks/create            { "file_key": "...", "metadata": {...}, "cover_id": "..." }
 ```
 
 轮询成功（`state: done, status: ok`）响应：
@@ -193,7 +196,7 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 }
 ```
 
-重复内容会在上传处理阶段按 `audio_hash` 识别，并返回 `{ "state": "done", "status": "duplicate", "track_id": 123, "title": "..." }`。`POST /rest/x-banana/tracks/create` 请求体必须包含 `{ "file_key": "..." }`，可选 `parse_metadata` 默认为 `true`。元数据由服务端从 `upload_staging` 与文件标签解析；`parse_metadata: true` 时入库后会异步执行 `parse_upload` 流水线。
+重复内容会在上传处理阶段按 `audio_hash` 识别，并返回 `{ "state": "done", "status": "duplicate", "track_id": 123, "title": "..." }`。`POST /rest/x-banana/tracks/create` 请求体必须包含 `{ "file_key": "..." }`，元数据由客户端解析/清洗后通过 `metadata` 提交；后端不再解析音频标签，也不再入队 `parse_upload` 后台任务。
 
 批量导入工具可在调用 LLM 前先用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=<32位hex>` 查询是否重复。该接口匿名可用，命中返回 `{ "exists": true, "track_id": 123, "title": "..." }`，未命中返回 `{ "exists": false, "track_id": null, "title": null }`。
 

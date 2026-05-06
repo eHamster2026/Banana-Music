@@ -310,7 +310,8 @@ async def upload_file_with_client(
     if not file_key:
         raise RuntimeError(f"上传完成但缺少 file_key: {state}")
 
-    payload = {"file_key": file_key, "parse_metadata": parse_metadata}
+    _ = parse_metadata  # retained for older callers; server-side parse_upload queue was removed
+    payload = {"file_key": file_key}
     if metadata is not None:
         payload["metadata"] = _metadata_payload(metadata)
 

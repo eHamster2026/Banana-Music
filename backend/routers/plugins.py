@@ -67,6 +67,11 @@ class MetadataLookupRequest(BaseModel):
     plugin_id: Optional[str] = None   # None = 调用全部元数据插件
 
 
+class ParseUploadMetadataRequest(BaseModel):
+    filename_stem: str
+    raw_tags: dict[str, Any] = Field(default_factory=dict)
+
+
 class MetadataResultOut(BaseModel):
     plugin_id: str
     title: Optional[str] = None
@@ -208,6 +213,63 @@ async def download_track(
         raise HTTPException(502, f"插件下载失败: {exc}")
 
     return result
+
+
+@router.post("/{plugin_id}/parse-metadata", response_model=MetadataResultOut)
+async def parse_upload_metadata(
+    plugin_id: str,
+    body: ParseUploadMetadataRequest,
+    _user: models.User = Depends(get_current_user),
+):
+    """
+    调用指定元数据插件的上传标签清洗能力。
+
+    前端在 create_track 前调用该接口；该接口不入队、不写库。
+    """
+    from plugins.base import MetadataPlugin
+
+    record = _require_plugin_record(plugin_id)
+    if not record.enabled:
+        raise HTTPException(409, f"插件 {plugin_id!r} 当前已禁用")
+    if record.error:
+        raise HTTPException(409, f"插件 {plugin_id!r} 加载失败: {record.error}")
+    if not isinstance(record.instance, MetadataPlugin):
+        raise HTTPException(400, f"插件 {plugin_id!r} 不支持元数据清洗")
+
+    try:
+        wait_sec = float(record.config.get("timeout_sec", 120.0))
+    except (TypeError, ValueError):
+        wait_sec = 120.0
+
+    try:
+        result = await asyncio.wait_for(
+            record.instance.parse_upload(body.filename_stem, body.raw_tags or None),
+            timeout=wait_sec,
+        )
+    except asyncio.TimeoutError as exc:
+        logger.warning("插件 parse-metadata 超时: plugin=%s stem=%r", plugin_id, body.filename_stem)
+        raise HTTPException(504, "元数据清洗超时") from exc
+    except PluginUpstreamError as exc:
+        logger.warning("插件 parse-metadata 上游异常: plugin=%s err=%s", plugin_id, exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except PluginParseError as exc:
+        logger.warning("插件 parse-metadata 解析失败: plugin=%s err=%s", plugin_id, exc)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
+
+    if result is None:
+        raise HTTPException(422, "元数据清洗无结果")
+
+    return MetadataResultOut(
+        plugin_id=plugin_id,
+        title=result.title,
+        artists=result.artists,
+        album=result.album,
+        track_number=result.track_number,
+        release_date=result.release_date,
+        lyrics=result.lyrics,
+        cover_url=result.cover_url,
+        confidence=result.confidence,
+    )
 
 
 @router.post("/metadata/lookup", response_model=list[MetadataResultOut])

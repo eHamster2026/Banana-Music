@@ -279,21 +279,6 @@ class FingerprintTask(Base):
     track = relationship("Track")
 
 
-class ParseUploadTask(Base):
-    """parse_upload 清洗任务队列：create_track 写入，parse_upload_worker 消费。
-    持久化确保服务重启后任务不丢失（与 FingerprintTask 设计一致）。"""
-    __tablename__ = "parse_upload_tasks"
-
-    id            = Column(Integer, primary_key=True, index=True)
-    track_id      = Column(Integer, ForeignKey("tracks.id", ondelete="CASCADE"),
-                           unique=True, nullable=False)
-    filename_stem = Column(String(500), nullable=False)
-    raw_tags      = Column(Text, nullable=True)   # JSON，不含 cover_data 等 bytes 字段
-    created_at    = Column(Integer, default=utcnow)
-
-    track = relationship("Track")
-
-
 class UploadStaging(Base):
     """
     上传暂存表：在 upload-file 和 create 之间持久化中间计算结果。
