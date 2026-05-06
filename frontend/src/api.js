@@ -1,7 +1,11 @@
 import i18n from './i18n'
 
-const API = (window.location.protocol !== 'file:' && window.location.hostname !== '')
-  ? '' : 'http://localhost:8000';
+const API = import.meta.env.VITE_API_BASE
+  || (window.location.protocol === 'file:' || window.location.hostname === ''
+    ? 'http://localhost:8000'
+    : window.location.port === '5173'
+      ? `${window.location.protocol}//${window.location.hostname}:8000`
+      : '');
 
 export async function apiFetch(path, opts = {}, token = null) {
   const headers = { 'Content-Type': 'application/json' };
@@ -31,7 +35,13 @@ export function uploadSingleFile(file, token) {
     method: 'POST',
     body: form,
     headers: token ? { Authorization: 'Bearer ' + token } : {},
-  }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() })
+  }).then(async r => {
+    if (!r.ok) {
+      const err = await r.json().catch(async () => ({ detail: await r.text().catch(() => '') }))
+      throw Object.assign(new Error(err.detail || 'HTTP ' + r.status), { status: r.status, detail: err })
+    }
+    return r.json()
+  })
 }
 
 /**

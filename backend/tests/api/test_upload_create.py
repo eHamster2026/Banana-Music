@@ -89,6 +89,20 @@ async def test_exists_by_hash_rejects_invalid_hash(client):
 
 
 @pytest.mark.asyncio
+async def test_upload_file_accepts_multi_megabyte_audio(client, monkeypatch, tmp_path):
+    monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
+    payload = b"not real audio" * 200_000
+
+    r = await client.post(
+        "/rest/x-banana/tracks/upload-file",
+        files={"file": ("large.flac", payload, "audio/flac")},
+    )
+
+    assert r.status_code == 200
+    assert "job_id" in r.json()
+
+
+@pytest.mark.asyncio
 async def test_upload_cover_and_create_track_uses_cover_id(client, monkeypatch, tmp_path):
     monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
     monkeypatch.setattr(upload, "COVER_DIR", tmp_path / "covers")

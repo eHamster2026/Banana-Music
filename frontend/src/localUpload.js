@@ -54,6 +54,8 @@ function logUploadError(stage, file, err, extra = {}) {
     file: file?.name,
     ...extra,
     error: err,
+    status: err?.status,
+    detail: err?.detail,
   })
 }
 
