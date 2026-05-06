@@ -78,7 +78,6 @@ class PluginContext:
         """
         # 延迟导入，避免循环依赖
         from routers.upload import (
-            _apply_cover,
             _get_or_create_album,
             _get_or_create_artist,
             _process_uploaded_file_sync,
@@ -165,9 +164,9 @@ class PluginContext:
                     track_number=track_number,
                     lyrics=lyrics,
                     stream_url=f"/resource/{file_key}",
+                    is_local=True,
                     audio_hash=audio_hash,
                 )
-                _apply_cover(tag, album_obj, track)
                 db.add(track)
                 db.flush()
                 add_track_featured_artists(db, track.id, names, _get_or_create_artist)
