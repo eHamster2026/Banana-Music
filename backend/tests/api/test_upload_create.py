@@ -178,3 +178,35 @@ async def test_create_track_metadata_override_takes_precedence(
         assert [ta.artist.name for ta in track.track_artists] == ["Guest Artist"]
     finally:
         db.close()
+
+
+@pytest.mark.asyncio
+async def test_create_track_metadata_override_survives_tag_parse_failure(
+    client, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(upload, "RESOURCE_DIR", tmp_path)
+
+    def fail_parse(_path):
+        raise RuntimeError("parser unavailable")
+
+    monkeypatch.setattr(upload, "_parse_tags", fail_parse)
+    file_key = "d" * 64 + ".mp3"
+    _stage_upload(file_key, tmp_path)
+
+    r = await client.post(
+        "/rest/x-banana/tracks/create",
+        json={
+            "file_key": file_key,
+            "parse_metadata": False,
+            "metadata": {
+                "title": "Client Title",
+                "artists": ["Client Artist"],
+            },
+        },
+    )
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "added"
+    assert body["title"] == "Client Title"
+    assert body["artists"] == ["Client Artist"]

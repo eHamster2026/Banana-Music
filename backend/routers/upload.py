@@ -28,11 +28,10 @@ from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from deps import get_db
 from database import SessionLocal
 from config import settings
 from services.upload_hooks import run_post_fingerprint_hooks
@@ -67,6 +66,9 @@ _cpu_count = os.cpu_count() or 1
 _upload_worker_limit = max(1, _cpu_count - 1)
 _upload_num_workers  = max(1, min(settings.upload_max_workers, _upload_worker_limit))
 _executor = ThreadPoolExecutor(max_workers=_upload_num_workers)
+_metadata_worker_limit = min(4, max(1, _cpu_count // 2))
+_metadata_executor = ThreadPoolExecutor(max_workers=_metadata_worker_limit)
+_METADATA_PARSE_TIMEOUT_SEC = 10.0
 
 # ── 上传任务队列 ──────────────────────────────────────────────
 
@@ -1033,12 +1035,44 @@ def _apply_metadata_override(tag: dict, metadata: CreateTrackMetadata | None) ->
     return out
 
 
+async def _parse_tags_for_create(save_path: Path) -> dict:
+    """
+    Parse create-time tags without competing with upload transcode/hash workers.
+
+    Tests call FastAPI through ASGITransport; running this tiny parser
+    synchronously in BANANA_TESTING avoids an executor wake-up deadlock observed
+    in that harness while keeping production on a dedicated metadata executor.
+    """
+    if settings.banana_testing:
+        try:
+            return _parse_tags(save_path) or {}
+        except Exception:
+            logger.warning("create_track 标签解析失败: path=%s", save_path.name, exc_info=True)
+            return {}
+
+    loop = asyncio.get_running_loop()
+    try:
+        tag = await asyncio.wait_for(
+            loop.run_in_executor(_metadata_executor, _parse_tags, save_path),
+            timeout=_METADATA_PARSE_TIMEOUT_SEC,
+        )
+        return tag or {}
+    except asyncio.TimeoutError:
+        logger.warning(
+            "create_track 标签解析超时: path=%s timeout=%.1fs",
+            save_path.name,
+            _METADATA_PARSE_TIMEOUT_SEC,
+        )
+    except Exception:
+        logger.warning("create_track 标签解析失败: path=%s", save_path.name, exc_info=True)
+    return {}
+
+
 # ── 端点 ──────────────────────────────────────────────────────
 
 @router.get("/exists-by-hash")
 async def exists_by_hash(
     audio_hash: str = Query(..., description="32 位十六进制 audio_hash"),
-    db: Session = Depends(get_db),
 ):
     """
     轻量按 audio_hash 查重。
@@ -1049,10 +1083,14 @@ async def exists_by_hash(
     if not re.fullmatch(r"[0-9a-f]{32}", value):
         raise HTTPException(400, "audio_hash 必须是 32 位十六进制字符串")
 
-    track = db.query(models.Track).filter(models.Track.audio_hash == bytes.fromhex(value)).first()
-    if not track:
-        return {"exists": False, "track_id": None, "title": None}
-    return {"exists": True, "track_id": track.id, "title": track.title}
+    db = SessionLocal()
+    try:
+        track = db.query(models.Track).filter(models.Track.audio_hash == bytes.fromhex(value)).first()
+        if not track:
+            return {"exists": False, "track_id": None, "title": None}
+        return {"exists": True, "track_id": track.id, "title": track.title}
+    finally:
+        db.close()
 
 
 @router.post("/upload-file")
@@ -1202,7 +1240,15 @@ async def _parse_upload_batch() -> None:
 
 
 @router.post("/create")
-async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
+async def create_track(req: CreateTrackRequest):
+    db = SessionLocal()
+    try:
+        return await _create_track_in_db(req, db)
+    finally:
+        db.close()
+
+
+async def _create_track_in_db(req: CreateTrackRequest, db: Session):
     """
     根据 file_key 在数据库中创建曲目记录，立即返回 track_id。
 
@@ -1232,9 +1278,7 @@ async def create_track(req: CreateTrackRequest, db: Session = Depends(get_db)):
     filename_stem:    str          = Path(original_name).stem
 
     # ── 快速重解析 Mutagen 标签 ────────────────────────────────
-    loop = asyncio.get_event_loop()
-    tag: dict | None = await loop.run_in_executor(_executor, _parse_tags, save_path)
-    tag = tag or {}
+    tag = await _parse_tags_for_create(save_path)
     tag = _apply_metadata_override(tag, req.metadata)
 
     # 无内嵌标题时不杜撰：不用文件名顶替（界面用 track id 占位）
@@ -1381,7 +1425,7 @@ async def _fingerprint_batch():
         if not tasks:
             return
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         for task in tasks:
             track = (
