@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import Optional, List
+from typing import Any, Optional, List
 
 
 # ── Artist ──────────────────────────────────────────
@@ -8,6 +8,7 @@ class ArtistBase(BaseModel):
     art_color: str = "art-1"
     bio: Optional[str] = None
     monthly_listeners: int = 0
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 class ArtistOut(ArtistBase):
     id: int
@@ -21,6 +22,7 @@ class AlbumBase(BaseModel):
     cover_url: Optional[str] = None
     release_date: Optional[str] = None
     album_type: str = "album"
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 class AlbumOut(AlbumBase):
     id: int
@@ -46,6 +48,7 @@ class TrackBase(BaseModel):
     lyrics: Optional[str] = None
     cover_url: Optional[str] = None
     stream_url: Optional[str] = None
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 class TrackOut(TrackBase):
     id: int
@@ -120,6 +123,7 @@ class TrackAdminOut(BaseModel):
     cover_url: Optional[str] = None
     stream_url: Optional[str] = None
     created_at: Optional[int] = None
+    ext: dict[str, Any] = Field(default_factory=dict)
     model_config = {"from_attributes": True}
 
 class TrackMetadataPatch(BaseModel):
@@ -137,6 +141,33 @@ class TrackAdminUpdate(TrackMetadataPatch):
     """管理端单首更新（与 TrackMetadataPatch 同结构）。"""
 
     pass
+
+
+class MediaImageOut(BaseModel):
+    id: int
+    entity_type: str
+    entity_id: int
+    image_type: str
+    image_url: str
+    mime_type: str
+    created_by_user_id: Optional[int] = None
+    created_at: Optional[int] = None
+    ext: dict[str, Any] = Field(default_factory=dict)
+
+
+class MediaImageUpdate(BaseModel):
+    image_type: Optional[str] = None
+    ext: Optional[dict[str, Any]] = None
+
+
+class MetadataExtPatch(BaseModel):
+    ext: dict[str, Any] = Field(default_factory=dict)
+
+
+class MetadataExtOut(BaseModel):
+    entity_type: str
+    entity_id: int
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 class UserAdminOut(BaseModel):
     id: int

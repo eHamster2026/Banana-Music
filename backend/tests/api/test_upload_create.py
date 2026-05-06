@@ -144,6 +144,12 @@ async def test_create_track_uses_client_metadata(
     assert body["status"] == "added"
     assert body["title"] == "Title"
     assert body["artists"] == ["Artist"]
+    db = SessionLocal()
+    try:
+        track = db.get(models.Track, body["track_id"])
+        assert track.is_local is True
+    finally:
+        db.close()
 
 
 @pytest.mark.asyncio
@@ -180,6 +186,7 @@ async def test_create_track_metadata_writes_album_and_featured_artists(
                 "artists": ["Clean Artist", "Guest Artist"],
                 "album": "Clean Album",
                 "track_number": 7,
+                "ext": {"catalog": "BWV 1"},
             },
         },
     )
@@ -197,6 +204,7 @@ async def test_create_track_metadata_writes_album_and_featured_artists(
         assert track.artist.name == "Clean Artist"
         assert track.album.title == "Clean Album"
         assert track.track_number == 7
+        assert track.ext == {"catalog": "BWV 1"}
         assert [ta.artist.name for ta in track.track_artists] == ["Guest Artist"]
     finally:
         db.close()

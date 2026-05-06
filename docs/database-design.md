@@ -21,7 +21,8 @@ CREATE TABLE artists (
   name              VARCHAR(100) NOT NULL,
   art_color         VARCHAR(20),
   bio               TEXT,
-  monthly_listeners INTEGER
+  monthly_listeners INTEGER,
+  ext               JSON NOT NULL DEFAULT '{}'
 );
 
 CREATE TABLE users (
@@ -43,7 +44,8 @@ CREATE TABLE albums (
   cover_path   VARCHAR(255),
   release_date VARCHAR(10),
   album_type   VARCHAR(20),
-  created_at   INTEGER
+  created_at   INTEGER,
+  ext          JSON NOT NULL DEFAULT '{}'
 );
 
 -- ── 专辑多艺人关联（feat. / 合辑参与者等）───────────────────
@@ -66,9 +68,23 @@ CREATE TABLE tracks (
   lyrics            TEXT,
   cover_path        VARCHAR(255),
   stream_url        VARCHAR(500),
+  is_local          BOOLEAN NOT NULL DEFAULT 0,
   created_at        INTEGER,
+  ext               JSON NOT NULL DEFAULT '{}',
   audio_hash        BLOB NOT NULL,  -- PCM MD5，16 字节
   audio_fingerprint BLOB
+);
+
+CREATE TABLE media_images (
+  id                 INTEGER      NOT NULL PRIMARY KEY,
+  entity_type        VARCHAR(20)  NOT NULL, -- track / album / artist
+  entity_id          INTEGER      NOT NULL,
+  image_type         VARCHAR(20)  NOT NULL, -- cover / back / fanart / artist
+  path               VARCHAR(255) NOT NULL,
+  mime_type          VARCHAR(100) NOT NULL,
+  created_by_user_id INTEGER REFERENCES users (id),
+  created_at         INTEGER,
+  ext                JSON NOT NULL DEFAULT '{}'
 );
 
 -- ── 曲目多艺人关联（feat. 等参与艺人）───────────────────────
@@ -185,7 +201,13 @@ CREATE UNIQUE INDEX ix_users_api_key  ON users (api_key);
 CREATE INDEX ix_albums_id ON albums (id);
 
 CREATE INDEX ix_tracks_id        ON tracks (id);
+CREATE INDEX ix_tracks_is_local  ON tracks (is_local);
 CREATE UNIQUE INDEX ix_tracks_audio_hash ON tracks (audio_hash);
+CREATE INDEX ix_media_images_id ON media_images (id);
+CREATE INDEX ix_media_images_entity_type ON media_images (entity_type);
+CREATE INDEX ix_media_images_entity_id ON media_images (entity_id);
+CREATE INDEX ix_media_images_image_type ON media_images (image_type);
+CREATE INDEX ix_media_images_entity ON media_images (entity_type, entity_id);
 
 CREATE INDEX ix_playlists_id ON playlists (id);
 CREATE UNIQUE INDEX uq_playlists_user_id_lower_name
@@ -219,6 +241,8 @@ CREATE INDEX ix_banners_id ON banners (id);
 | `play_queues.updated_at` | v0.11 由 FLOAT 改为 INTEGER Unix 秒；`position_sec` 为播放进度保持 FLOAT。老库需手动执行 `CAST(ROUND(updated_at) AS INTEGER)` 迁移。 |
 | `user_library_*.added_at` | v0.11 移除；列表排序改为按主键 id 降序。旧库如仍保留该列，需手动迁移，ORM 会忽略它。 |
 | 测试库 | `BANANA_TESTING=true` 时使用内存 SQLite，不写入 `schema_migrations`。 |
+
+v19 手动迁移：见 `scripts/migrate_schema_18_to_19.py`。
 
 v18 手动迁移示例：
 

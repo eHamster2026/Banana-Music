@@ -17,7 +17,7 @@ function fileStem(file) {
 }
 
 function createMetadataPayload(metadata) {
-  const allowed = ['title', 'artist', 'artists', 'album', 'album_artist', 'album_artists', 'release_date', 'track_number', 'lyrics']
+  const allowed = ['title', 'artist', 'artists', 'album', 'album_artist', 'album_artists', 'release_date', 'track_number', 'lyrics', 'ext']
   return Object.fromEntries(
     allowed
       .map(key => [key, metadata?.[key]])
@@ -28,6 +28,25 @@ function createMetadataPayload(metadata) {
         return true
       })
   )
+}
+
+export function createMetadataExt(rawTags = {}, metadata = {}) {
+  const known = new Set([
+    'title', 'artist', 'artists', 'album', 'album_artist', 'albumartist', 'album artist',
+    'album_artists', 'release_date', 'date', 'year', 'track', 'tracknumber',
+    'track_number', 'lyrics',
+  ])
+  const ext = {}
+  for (const [key, value] of Object.entries(rawTags || {})) {
+    const normalized = String(key).trim()
+    if (!normalized || known.has(normalized.toLowerCase())) continue
+    if (value == null) continue
+    if (Array.isArray(value) && value.length === 0) continue
+    if (typeof value === 'string' && !value.trim()) continue
+    if (typeof value === 'object' && !(Array.isArray(value))) continue
+    ext[normalized] = value
+  }
+  return Object.keys(ext).length ? { ...(metadata.ext || {}), ...ext } : metadata.ext
 }
 
 function logUploadError(stage, file, err, extra = {}) {
@@ -97,7 +116,9 @@ export async function uploadLocalAudioFiles({
         filename_stem: fileStem(file),
         raw_tags: parsed.raw_tags || parsed.metadata || {},
       }, token)
-      cleanedMetadata = createMetadataPayload(mergeMetadata(parsed.metadata, llm))
+      const merged = mergeMetadata(parsed.metadata, llm)
+      merged.ext = createMetadataExt(parsed.raw_tags || parsed.metadata || {}, merged)
+      cleanedMetadata = createMetadataPayload(merged)
     } catch (err) {
       logUploadError('metadata cleanup', file, err, { raw_tags: parsed.raw_tags || parsed.metadata || {} })
       showToast(i18n.t('upload.processFailedWithReason', {

@@ -7,6 +7,7 @@ from sqlalchemy import (
     Text,
     LargeBinary,
     Float,
+    JSON,
     Index,
     func,
     text,
@@ -54,6 +55,7 @@ class Artist(Base):
     art_color = Column(String(20), default="art-1")
     bio = Column(Text, nullable=True)
     monthly_listeners = Column(Integer, default=0)
+    ext = Column(JSON, default=dict, nullable=False)
 
     albums = relationship("Album", back_populates="artist")
     tracks = relationship("Track", back_populates="artist")
@@ -69,6 +71,7 @@ class Album(Base):
     release_date = Column(String(10))
     album_type = Column(String(20), default="album")
     created_at = Column(Integer, default=utcnow)
+    ext = Column(JSON, default=dict, nullable=False)
 
     artist = relationship("Artist", back_populates="albums")
     tracks = relationship(
@@ -105,7 +108,9 @@ class Track(Base):
     lyrics = Column(Text, nullable=True)
     cover_path = Column(String(255), nullable=True)
     stream_url = Column(String(500), nullable=True)
+    is_local = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(Integer, default=utcnow)
+    ext = Column(JSON, default=dict, nullable=False)
     # MD5 of decoded PCM — format-invariant, used for dedup
     audio_hash = Column(LargeBinary(16), unique=True, nullable=False, index=True)
     # Chromaprint fingerprint bytes — computed by background worker
@@ -144,6 +149,26 @@ class TrackArtist(Base):
 
     track  = relationship("Track",  back_populates="track_artists")
     artist = relationship("Artist")
+
+
+class MediaImage(Base):
+    """Hidden/auxiliary images bound to tracks, albums, or artists."""
+    __tablename__ = "media_images"
+    id = Column(Integer, primary_key=True, index=True)
+    entity_type = Column(String(20), nullable=False, index=True)
+    entity_id = Column(Integer, nullable=False, index=True)
+    image_type = Column(String(20), nullable=False, index=True)
+    path = Column(String(255), nullable=False)
+    mime_type = Column(String(100), nullable=False)
+    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(Integer, default=utcnow)
+    ext = Column(JSON, default=dict, nullable=False)
+
+    created_by = relationship("User")
+
+    __table_args__ = (
+        Index("ix_media_images_entity", "entity_type", "entity_id"),
+    )
 
 
 class AlbumArtist(Base):

@@ -23,5 +23,6 @@
 #   16  audio_hash ORM 定义修正为 PCM MD5（16 B），并设为 NOT NULL
 #   17  tracks: 移除 file_hash；上传与去重统一使用 audio_hash
 #   18  移除 parse_upload_tasks；上传元数据改由客户端解析并同步提交
+#   19  tracks.is_local；tracks/albums/artists.ext；media_images 隐藏图片表
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19

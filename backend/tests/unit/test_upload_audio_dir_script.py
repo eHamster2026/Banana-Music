@@ -57,7 +57,13 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
     captured = {}
 
     def fake_read_embedded_metadata(_path, *, timeout):
-        return MetadataResult(title="Cantata", artists=["Bach"], album="Bach 2000", track_number=12)
+        return MetadataResult(
+            title="Cantata",
+            artists=["Bach"],
+            album="Bach 2000",
+            track_number=12,
+            ext={"CATALOGNUMBER": "BWV 2"},
+        )
 
     def fake_read_embedded_cover(_path):
         return EmbeddedCover(data=b"cover", ext=".jpg")
@@ -104,6 +110,7 @@ async def test_upload_worker_sends_extracted_metadata(monkeypatch, tmp_path):
     assert captured["parse_metadata"] is False
     assert captured["metadata"].title == "Cantata"
     assert captured["metadata"].artists == ["Bach"]
+    assert captured["metadata"].ext == {"CATALOGNUMBER": "BWV 2"}
     assert captured["cover"].data == b"cover"
     assert results == [{"file": str(path), "status": "added", "track_id": 1}]
 

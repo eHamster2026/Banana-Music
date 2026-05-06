@@ -18,6 +18,7 @@ async def test_list_tracks_default_includes_more_than_legacy_page_size(client):
                 artist_id=artist.id,
                 duration_sec=180,
                 stream_url=f"/resource/track-{i}.flac",
+                is_local=True,
                 audio_hash=f"track-{i}".encode("ascii").ljust(16, b"-"),
             ))
         db.commit()
@@ -46,6 +47,7 @@ async def test_get_songs_marks_liked_tracks_for_current_user(client):
             artist_id=artist.id,
             duration_sec=180,
             stream_url="/resource/liked.flac",
+            is_local=True,
             audio_hash=b"liked-track".ljust(16, b"-"),
         )
         other_track = models.Track(
@@ -53,6 +55,7 @@ async def test_get_songs_marks_liked_tracks_for_current_user(client):
             artist_id=artist.id,
             duration_sec=180,
             stream_url="/resource/other.flac",
+            is_local=True,
             audio_hash=b"other-track".ljust(16, b"-"),
         )
         db.add_all([liked_track, other_track])

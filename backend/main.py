@@ -17,7 +17,7 @@ REACT_DIST   = FRONTEND_DIR / "frontend" / "dist"
 DATA_DIR     = FRONTEND_DIR / "data"
 DATA_DIR.mkdir(exist_ok=True)
 
-SCHEMA_DESCRIPTION = "移除 parse_upload_tasks；上传元数据由客户端解析并同步提交"
+SCHEMA_DESCRIPTION = "新增 is_local/ext 字段与 media_images 隐藏图片表"
 
 # ── Schema 版本检查 ────────────────────────────────────────────
 # 版本历史存储在 schema_migrations 表，避免文件与数据库不一致。

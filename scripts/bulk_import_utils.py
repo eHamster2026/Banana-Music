@@ -26,6 +26,7 @@ class MetadataResult:
     album_artists: list = field(default_factory=list)
     track_number: Optional[int] = None
     confidence: float = 0.0
+    ext: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -79,6 +80,18 @@ def _tag_values(audio, key: str) -> list[str]:
 def _clean_text(value) -> str | None:
     if value is None:
         return None
+    text = str(value).strip()
+    return text or None
+
+
+def _json_safe(value):
+    if value is None or isinstance(value, (bytes, bytearray)):
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        cleaned = [_json_safe(item) for item in value]
+        return [item for item in cleaned if item not in (None, "", [], {})]
     text = str(value).strip()
     return text or None
 
@@ -214,6 +227,19 @@ def _metadata_via_ffprobe(path: Path, timeout: float) -> MetadataResult | None:
     track_number = _parse_track_number(
         _tag_value_from_sets(tag_sets, "track", "tracknumber", "track_number")
     )
+    known = {
+        "title", "artist", "artists", "album", "album_artist", "albumartist",
+        "album artist", "track", "tracknumber", "track_number", "date", "year",
+        "lyrics",
+    }
+    ext: dict = {}
+    for tags in tag_sets:
+        for key, value in tags.items():
+            if str(key).casefold() in known:
+                continue
+            safe = _json_safe(value)
+            if safe not in (None, "", [], {}):
+                ext.setdefault(str(key), safe)
 
     artists = [artist] if artist else []
     album_artists = [album_artist] if album_artist else []
@@ -225,6 +251,7 @@ def _metadata_via_ffprobe(path: Path, timeout: float) -> MetadataResult | None:
         album_artists=album_artists,
         track_number=track_number,
         confidence=1.0 if title and artists else 0.0,
+        ext=ext,
     )
 
 
@@ -255,6 +282,18 @@ def read_embedded_metadata(path: Path, *, timeout: float = 5.0) -> MetadataResul
     title_values = _tag_values(audio, "title")
     album_values = _tag_values(audio, "album")
     track_values = _tag_values(audio, "tracknumber")
+    known = {"title", "artist", "albumartist", "album", "tracknumber", "date", "year", "lyrics"}
+    ext: dict = dict(ffprobe_result.ext) if ffprobe_result else {}
+    for key in (audio.keys() if hasattr(audio, "keys") else []):
+        if str(key).casefold() in known:
+            continue
+        try:
+            value = audio.get(key)
+        except Exception:
+            continue
+        safe = _json_safe(value)
+        if safe not in (None, "", [], {}):
+            ext.setdefault(str(key), safe)
     return MetadataResult(
         title=title_values[0] if title_values else None,
         artists=artists,
@@ -263,6 +302,7 @@ def read_embedded_metadata(path: Path, *, timeout: float = 5.0) -> MetadataResul
         album_artists=album_artists,
         track_number=_parse_track_number(track_values[0] if track_values else None),
         confidence=1.0 if title_values and artists else 0.0,
+        ext=ext,
     )
 
 
@@ -384,6 +424,7 @@ def _metadata_payload(metadata: MetadataResult) -> dict:
         "album_artist": metadata.album_artist,
         "album_artists": metadata.album_artists,
         "track_number": metadata.track_number,
+        "ext": metadata.ext,
     }
 
 

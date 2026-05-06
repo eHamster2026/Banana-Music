@@ -37,7 +37,7 @@ def home(db: Session = Depends(get_db), user=Depends(get_optional_user)):
         .order_by(models.Artist.monthly_listeners.desc()).limit(8).all()
 
     local_tracks = db.query(models.Track)\
-        .filter(models.Track.stream_url.like('/resource/%'))\
+        .filter(models.Track.is_local.is_(True))\
         .all()
     mark_track_likes(db, local_tracks, user)
 

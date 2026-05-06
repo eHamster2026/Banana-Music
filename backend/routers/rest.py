@@ -1,14 +1,15 @@
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse
+from starlette.background import BackgroundTask
 from sqlalchemy import case, func, or_
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session, aliased, selectinload
+from sqlalchemy.orm import Session, aliased, joinedload, selectinload
 
 from config import settings
-from deps import get_current_user, get_db, get_optional_user
+from deps import get_admin_user, get_current_user, get_db, get_optional_user
 import models
 import schemas
 from routers import (
@@ -22,6 +23,7 @@ from routers import (
 from plugins.errors import PluginParseError, PluginUpstreamError
 from services.artist_names import UNKNOWN_ARTIST_NAMES
 from services.plugin_search import run_plugin_search_flat
+from services.download_tags import DownloadImage, prepare_tagged_download
 from services.track_likes import mark_track_like, mark_track_likes
 from services.track_load_options import track_out_load_options
 
@@ -108,6 +110,17 @@ def _cover_file_from_path(cover_path: str | None) -> Path | None:
     return Path(__file__).parent.parent.parent / "data" / "covers" / cover_path
 
 
+def _mime_from_cover_path(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    if suffix == ".png":
+        return "image/png"
+    if suffix == ".webp":
+        return "image/webp"
+    if suffix == ".gif":
+        return "image/gif"
+    return "image/jpeg"
+
+
 # ── System-ish endpoints ────────────────────────────────────────
 
 
@@ -135,7 +148,7 @@ def get_songs(
 ):
     q = db.query(models.Track).options(*track_out_load_options())
     if local:
-        q = q.filter(models.Track.stream_url.like("/resource/%"))
+        q = q.filter(models.Track.is_local.is_(True))
     if sort == "recent":
         q = q.order_by(models.Track.created_at.desc().nullslast(), models.Track.id.desc())
     else:
@@ -148,7 +161,7 @@ def get_songs(
 def get_song_count(local: bool = Query(False), db: Session = Depends(get_db)):
     q = db.query(models.Track)
     if local:
-        q = q.filter(models.Track.stream_url.like("/resource/%"))
+        q = q.filter(models.Track.is_local.is_(True))
     return q.count()
 
 
@@ -194,13 +207,60 @@ def stream(id: int = Query(...), db: Session = Depends(get_db)):
 
 @router.get("/download")
 def download(id: int = Query(...), db: Session = Depends(get_db)):
-    track = db.query(models.Track).filter(models.Track.id == id).first()
+    track = (
+        db.query(models.Track)
+        .options(
+            joinedload(models.Track.artist),
+            joinedload(models.Track.album).joinedload(models.Album.artist),
+            selectinload(models.Track.track_artists).joinedload(models.TrackArtist.artist),
+        )
+        .filter(models.Track.id == id)
+        .first()
+    )
     if not track:
         raise HTTPException(404, "歌曲不存在")
     local = _local_file_from_stream_url(track.stream_url)
     if not local or not local.exists():
         raise HTTPException(404, "文件不存在")
-    return FileResponse(local, filename=local.name)
+    image_records = (
+        db.query(models.MediaImage)
+        .filter(
+            or_(
+                (models.MediaImage.entity_type == "track") & (models.MediaImage.entity_id == track.id),
+                (models.MediaImage.entity_type == "album") & (models.MediaImage.entity_id == track.album_id),
+            )
+        )
+        .order_by(models.MediaImage.id)
+        .all()
+    )
+    images: list[DownloadImage] = []
+    seen_images: set[tuple[str, str]] = set()
+
+    def add_image(path_value: str | None, image_type: str, mime_type: str | None = None) -> None:
+        if not path_value:
+            return
+        key = (image_type, path_value)
+        if key in seen_images:
+            return
+        path = _cover_file_from_path(path_value)
+        if not path or not path.exists():
+            return
+        seen_images.add(key)
+        images.append(DownloadImage(path=path, image_type=image_type, mime_type=mime_type or _mime_from_cover_path(path_value)))
+
+    add_image(track.cover_path or (track.album.cover_path if track.album else None), "cover")
+    for record in image_records:
+        add_image(record.path, record.image_type, record.mime_type)
+
+    try:
+        tagged = prepare_tagged_download(local, track, images)
+    except Exception as exc:
+        raise HTTPException(500, f"下载标签写入失败: {type(exc).__name__}")
+    return FileResponse(
+        tagged,
+        filename=local.name,
+        background=BackgroundTask(lambda: tagged.unlink(missing_ok=True)),
+    )
 
 
 @router.get("/getLyrics")
@@ -809,6 +869,225 @@ x_banana.include_router(upload.router)
 x_banana.include_router(admin.router)
 x_banana.include_router(plugins_router.router)
 x_banana.include_router(queue_router.router)
+
+
+_ENTITY_MODELS = {
+    "track": models.Track,
+    "album": models.Album,
+    "artist": models.Artist,
+}
+_IMAGE_TYPES = {"cover", "back", "fanart", "artist"}
+
+
+def _get_entity(db: Session, entity_type: str, entity_id: int):
+    model = _ENTITY_MODELS.get(entity_type)
+    if model is None:
+        raise HTTPException(400, "entity_type 无效")
+    entity = db.query(model).filter(model.id == entity_id).first()
+    if not entity:
+        raise HTTPException(404, "实体不存在")
+    return entity
+
+
+def _clean_ext(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        text_key = str(key).strip()
+        if text_key:
+            out[text_key] = item
+    return out
+
+
+def _media_image_out(record: models.MediaImage) -> schemas.MediaImageOut:
+    return schemas.MediaImageOut(
+        id=record.id,
+        entity_type=record.entity_type,
+        entity_id=record.entity_id,
+        image_type=record.image_type,
+        image_url=f"/covers/{record.path}",
+        mime_type=record.mime_type,
+        created_by_user_id=record.created_by_user_id,
+        created_at=record.created_at,
+        ext=record.ext or {},
+    )
+
+
+@x_banana.post("/media-images", response_model=schemas.MediaImageOut)
+async def create_media_image(
+    entity_type: str = Form(...),
+    entity_id: int = Form(...),
+    image_type: str = Form(...),
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    user: models.User = Depends(get_current_user),
+):
+    entity_type = entity_type.strip().lower()
+    image_type = image_type.strip().lower()
+    if image_type not in _IMAGE_TYPES:
+        raise HTTPException(400, "image_type 无效")
+    _get_entity(db, entity_type, entity_id)
+
+    content_type = (file.content_type or "").lower()
+    data = await file.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        raise HTTPException(413, "图片文件过大")
+    if not data:
+        raise HTTPException(400, "图片文件为空")
+    if content_type and not content_type.startswith("image/"):
+        raise HTTPException(400, "文件必须是图片")
+    ext = upload._detect_cover_ext(data, content_type)
+    if ext not in {".jpg", ".png", ".webp", ".gif"}:
+        raise HTTPException(400, "不支持的图片格式")
+    path = upload._persist_cover(data, ext)
+    if not path:
+        raise HTTPException(500, "图片保存失败")
+    record = models.MediaImage(
+        entity_type=entity_type,
+        entity_id=entity_id,
+        image_type=image_type,
+        path=path,
+        mime_type=content_type or _mime_from_cover_path(path),
+        created_by_user_id=user.id,
+        ext={},
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return _media_image_out(record)
+
+
+@x_banana.get("/media-images", response_model=list[schemas.MediaImageOut])
+def list_media_images(
+    entity_type: str = Query(..., pattern="^(track|album|artist)$"),
+    entity_id: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    _get_entity(db, entity_type, entity_id)
+    records = (
+        db.query(models.MediaImage)
+        .filter(models.MediaImage.entity_type == entity_type, models.MediaImage.entity_id == entity_id)
+        .order_by(models.MediaImage.id)
+        .all()
+    )
+    return [_media_image_out(record) for record in records]
+
+
+@x_banana.patch("/media-images/{image_id}", response_model=schemas.MediaImageOut)
+def update_media_image(
+    image_id: int,
+    body: schemas.MediaImageUpdate,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_admin_user),
+):
+    record = db.get(models.MediaImage, image_id)
+    if not record:
+        raise HTTPException(404, "图片不存在")
+    if body.image_type is not None:
+        image_type = body.image_type.strip().lower()
+        if image_type not in _IMAGE_TYPES:
+            raise HTTPException(400, "image_type 无效")
+        record.image_type = image_type
+    if body.ext is not None:
+        record.ext = _clean_ext(body.ext)
+    db.commit()
+    db.refresh(record)
+    return _media_image_out(record)
+
+
+@x_banana.delete("/media-images/{image_id}", response_model=dict)
+def delete_media_image(
+    image_id: int,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_admin_user),
+):
+    record = db.get(models.MediaImage, image_id)
+    if not record:
+        raise HTTPException(404, "图片不存在")
+    db.delete(record)
+    db.commit()
+    return {"deleted": True, "image_id": image_id}
+
+
+@x_banana.get("/metadata-ext/{entity_type}/{entity_id}", response_model=schemas.MetadataExtOut)
+def get_metadata_ext(
+    entity_type: str,
+    entity_id: int,
+    db: Session = Depends(get_db),
+):
+    entity = _get_entity(db, entity_type, entity_id)
+    return schemas.MetadataExtOut(entity_type=entity_type, entity_id=entity_id, ext=entity.ext or {})
+
+
+@x_banana.post("/metadata-ext/{entity_type}/{entity_id}", response_model=schemas.MetadataExtOut)
+def add_metadata_ext(
+    entity_type: str,
+    entity_id: int,
+    body: schemas.MetadataExtPatch,
+    db: Session = Depends(get_db),
+    _user: models.User = Depends(get_current_user),
+):
+    entity = _get_entity(db, entity_type, entity_id)
+    current = dict(entity.ext or {})
+    incoming = _clean_ext(body.ext)
+    duplicate = sorted(set(current) & set(incoming))
+    if duplicate:
+        raise HTTPException(409, f"ext key 已存在: {', '.join(duplicate)}")
+    entity.ext = {**current, **incoming}
+    db.commit()
+    db.refresh(entity)
+    return schemas.MetadataExtOut(entity_type=entity_type, entity_id=entity_id, ext=entity.ext or {})
+
+
+@x_banana.put("/metadata-ext/{entity_type}/{entity_id}", response_model=schemas.MetadataExtOut)
+def replace_metadata_ext(
+    entity_type: str,
+    entity_id: int,
+    body: schemas.MetadataExtPatch,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_admin_user),
+):
+    entity = _get_entity(db, entity_type, entity_id)
+    entity.ext = _clean_ext(body.ext)
+    db.commit()
+    db.refresh(entity)
+    return schemas.MetadataExtOut(entity_type=entity_type, entity_id=entity_id, ext=entity.ext or {})
+
+
+@x_banana.patch("/metadata-ext/{entity_type}/{entity_id}", response_model=schemas.MetadataExtOut)
+def patch_metadata_ext(
+    entity_type: str,
+    entity_id: int,
+    body: schemas.MetadataExtPatch,
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_admin_user),
+):
+    entity = _get_entity(db, entity_type, entity_id)
+    entity.ext = {**dict(entity.ext or {}), **_clean_ext(body.ext)}
+    db.commit()
+    db.refresh(entity)
+    return schemas.MetadataExtOut(entity_type=entity_type, entity_id=entity_id, ext=entity.ext or {})
+
+
+@x_banana.delete("/metadata-ext/{entity_type}/{entity_id}", response_model=schemas.MetadataExtOut)
+def delete_metadata_ext(
+    entity_type: str,
+    entity_id: int,
+    key: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _admin: models.User = Depends(get_admin_user),
+):
+    entity = _get_entity(db, entity_type, entity_id)
+    current = dict(entity.ext or {})
+    if key:
+        current.pop(key, None)
+        entity.ext = current
+    else:
+        entity.ext = {}
+    db.commit()
+    db.refresh(entity)
+    return schemas.MetadataExtOut(entity_type=entity_type, entity_id=entity_id, ext=entity.ext or {})
 
 
 @x_banana.put("/albums/{album_id}/cover", response_model=schemas.AlbumOut)

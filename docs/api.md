@@ -200,6 +200,20 @@ API Key 权限与生成该 Key 的账号一致；管理员账号可调用 `/rest
 
 批量导入工具可在调用 LLM 前先用 `GET /rest/x-banana/tracks/exists-by-hash?audio_hash=<32位hex>` 查询是否重复。该接口匿名可用，命中返回 `{ "exists": true, "track_id": 123, "title": "..." }`，未命中返回 `{ "exists": false, "track_id": null, "title": null }`。
 
+### 元数据扩展与隐藏图片
+
+安全模型：任意登录用户可以增加库信息；修改或删除已有信息需要管理员权限。
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/rest/x-banana/media-images` | 登录用户新增隐藏图片，表单字段：`file, entity_type, entity_id, image_type` |
+| GET | `/rest/x-banana/media-images?entity_type=<track|album|artist>&entity_id=<id>` | 列出实体隐藏图片 |
+| PATCH/DELETE | `/rest/x-banana/media-images/{id}` | 管理员修改或删除图片记录 |
+| POST | `/rest/x-banana/metadata-ext/{entity_type}/{id}` | 登录用户新增不存在的 `ext` 顶层 key |
+| PUT/PATCH/DELETE | `/rest/x-banana/metadata-ext/{entity_type}/{id}` | 管理员覆盖、修改或删除 `ext` |
+
+隐藏图片默认不参与页面展示；下载本地曲目时会把 Track + Album 的隐藏图片写入临时下载副本。格式无法标准表达多类型图片时仅写入 cover，并跳过其它隐藏图片。
+
 ### 播放队列扩展
 
 | 方法 | 路径 | 说明 |

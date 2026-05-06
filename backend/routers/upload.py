@@ -20,7 +20,7 @@ import secrets
 import time as _time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger(__name__)
@@ -219,6 +219,17 @@ def _clean_text(value) -> str | None:
         value = value.decode("utf-8", errors="ignore")
     text = str(value).strip()
     return text or None
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for key, item in value.items():
+        text_key = _clean_text(key)
+        if text_key:
+            out[text_key] = item
+    return out
 
 
 def _detect_cover_ext(data: bytes, mime: str | None = None) -> str:
@@ -733,6 +744,7 @@ class CreateTrackMetadata(BaseModel):
     release_date: Optional[str] = None
     track_number: Optional[int] = None
     lyrics: Optional[str] = None
+    ext: dict[str, Any] = Field(default_factory=dict)
 
 
 class CreateTrackRequest(BaseModel):
@@ -958,6 +970,7 @@ async def _create_track_in_db(req: CreateTrackRequest, db: Session):
     duration:         int          = staging.duration_sec or 0
     tag = _metadata_to_tag_dict(req.metadata)
     cover_path = _cover_path_from_id(req.cover_id)
+    ext = _json_object(req.metadata.ext if req.metadata else {})
 
     # 无内嵌标题时不杜撰：不用文件名顶替（界面用 track id 占位）
     title        = _clean_text(tag.get("title")) or ""
@@ -1002,8 +1015,10 @@ async def _create_track_in_db(req: CreateTrackRequest, db: Session):
             track_number=track_number,
             lyrics=lyrics,
             stream_url=f"/resource/{req.file_key}",
+            is_local=True,
             audio_hash=audio_hash_bytes,
             audio_fingerprint=None,   # 由后台指纹任务填充
+            ext=ext,
         )
         if cover_path:
             if album_obj and not album_obj.cover_path:
