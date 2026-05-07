@@ -14,7 +14,7 @@ import usePageRefresh from '../hooks/usePageRefresh'
 export default function SearchView({ query }) {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks, setContextQueue } = usePlayer()
   const { token } = useAuth()
   const { showToast } = useToast()
   const [results, setResults] = useState(null)
@@ -198,7 +198,7 @@ export default function SearchView({ query }) {
                 num={i + 1}
                 contextIdx={i}
                 isPlaying={currentTrackId === track.id}
-                onPlay={() => { setContextQueue(tracks); playFromContext(i) }}
+                onPlay={() => playTracks(tracks, i)}
                 onLike={() => toggleLike(track)}
               />
             ))}

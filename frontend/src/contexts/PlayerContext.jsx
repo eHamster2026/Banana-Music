@@ -370,20 +370,25 @@ export function PlayerProvider({ children }) {
     sendCommand('play_now', { track_ids: [track.id], start_index: 0 })
   }
 
-  async function playFromContext(idx) {
-    const cq = contextQueue
-    if (idx < 0 || idx >= cq.length) return
-    setQueue(cq)
-    queueRef.current = cq
+  async function playTracks(tracks, idx = 0) {
+    const nextQueue = Array.isArray(tracks) ? tracks : []
+    if (idx < 0 || idx >= nextQueue.length) return
+    setContextQueueState(nextQueue)
+    setQueue(nextQueue)
+    queueRef.current = nextQueue
     setQueueIndex(idx)
     queueIndexRef.current = idx
     markActiveDevice()
-    await loadTrack(cq[idx])
+    await loadTrack(nextQueue[idx])
     audioRef.current.play().catch(() => {})
     sendCommand('play_now', {
-      track_ids: cq.map(t => t.id),
+      track_ids: nextQueue.map(t => t.id),
       start_index: idx,
     })
+  }
+
+  async function playFromContext(idx) {
+    await playTracks(contextQueue, idx)
   }
 
   const setContextQueue = useCallback((tracks) => {
@@ -503,7 +508,7 @@ export function PlayerProvider({ children }) {
       contextQueue,
       audioRef,
       currentTime, duration,
-      playTrack, playFromContext, setContextQueue,
+      playTrack, playTracks, playFromContext, setContextQueue,
       loadAndPlayTrack,
       togglePlay, nextTrack, prevTrack,
       toggleShuffle, toggleRepeat,

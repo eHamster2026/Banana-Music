@@ -14,7 +14,7 @@ const PAGE_SIZE = 100
 export default function RecentlyAddedView() {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks } = usePlayer()
   const { token } = useAuth()
   const { showToast } = useToast()
   const [tracks, setTracks] = useState([])
@@ -130,13 +130,13 @@ export default function RecentlyAddedView() {
         <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: '-0.5px', marginBottom: 4 }}>{t('recent.pageTitle')}</div>
         <div style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 20 }}>{t('common.trackCount', { count: totalCount ?? tracks.length })}</div>
         <div className="detail-actions" style={{ marginBottom: 4 }}>
-          <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
+          <button className="btn-primary" onClick={() => playTracks(tracks, 0)}>
             <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
             {t('common.playAll')}
           </button>
           <button className="btn-secondary" onClick={() => {
             const shuffled = [...tracks].sort(() => Math.random() - 0.5)
-            setContextQueue(shuffled); playFromContext(0)
+            playTracks(shuffled, 0)
           }}>{t('common.shuffle')}</button>
         </div>
       </div>
@@ -154,7 +154,7 @@ export default function RecentlyAddedView() {
             track={track}
             contextIdx={i}
             isPlaying={currentTrackId === track.id}
-            onPlay={() => { setContextQueue(tracks); playFromContext(i) }}
+            onPlay={() => playTracks(tracks, i)}
             onLike={() => toggleLike(track)}
           />
         ))}

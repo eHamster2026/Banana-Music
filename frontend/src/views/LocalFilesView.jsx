@@ -14,7 +14,7 @@ const PAGE_SIZE = 100
 export default function LocalFilesView() {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks } = usePlayer()
   const { token } = useAuth()
   const { showToast } = useToast()
   const [tracks, setTracks] = useState([])
@@ -157,7 +157,7 @@ export default function LocalFilesView() {
             track={track}
             contextIdx={i}
             isPlaying={currentTrackId === track.id}
-            onPlay={() => { setContextQueue(tracks); playFromContext(i) }}
+            onPlay={() => playTracks(tracks, i)}
             onLike={() => toggleLike(track)}
           />
         ))}

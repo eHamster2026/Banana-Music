@@ -12,7 +12,7 @@ import usePageRefresh from '../hooks/usePageRefresh'
 export default function AlbumView({ id }) {
   const { t } = useTranslation()
   const { setTopbarTitle, navigate } = useNav()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks, setContextQueue } = usePlayer()
   const { token } = useAuth()
   const { showToast } = useToast()
   const [album, setAlbum]       = useState(null)
@@ -163,13 +163,13 @@ export default function AlbumView({ id }) {
             <span> · {t('albums.trackCount', { count: tracks.length })} · {fmtTime(totalDur)}</span>
           </div>
           <div className="detail-actions">
-            <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
+            <button className="btn-primary" onClick={() => playTracks(tracks, 0)}>
               <svg viewBox="0 0 16 16" fill="currentColor">
                 <path d="M3.5 2.5l10 5.5-10 5.5z"/>
               </svg>
               {t('common.play')}
             </button>
-            <button className="btn-secondary" onClick={() => { setContextQueue(tracks); playFromContext(Math.floor(Math.random() * tracks.length)) }}>
+            <button className="btn-secondary" onClick={() => playTracks(tracks, Math.floor(Math.random() * tracks.length))}>
               {t('common.shuffle')}
             </button>
             <button
@@ -204,7 +204,7 @@ export default function AlbumView({ id }) {
             num={i + 1}
             contextIdx={i}
             isPlaying={currentTrackId === track.id}
-            onPlay={() => { setContextQueue(tracks); playFromContext(i) }}
+            onPlay={() => playTracks(tracks, i)}
             onLike={() => toggleLike(track)}
           />
         ))}

@@ -13,7 +13,7 @@ const GRID_ORDERED = '44px 2fr 1fr 1fr 60px 36px 36px 44px 36px 36px'
 export default function PlaylistView({ id }) {
   const { t } = useTranslation()
   const { setTopbarTitle } = useNav()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks, setContextQueue } = usePlayer()
   const { token } = useAuth()
   const { showToast } = useToast()
   const [playlist, setPlaylist] = useState(null)
@@ -94,13 +94,13 @@ export default function PlaylistView({ id }) {
           <div className="detail-actions">
             {tracks.length > 0 && (
               <>
-                <button className="btn-primary" onClick={() => { setContextQueue(tracks); playFromContext(0) }}>
+                <button className="btn-primary" onClick={() => playTracks(tracks, 0)}>
                   <svg viewBox="0 0 16 16" fill="currentColor"><path d="M3.5 2.5l10 5.5-10 5.5z"/></svg>
                   {t('common.play')}
                 </button>
                 <button className="btn-secondary" onClick={() => {
                   const shuffled = [...tracks].sort(() => Math.random() - 0.5)
-                  setContextQueue(shuffled); playFromContext(0)
+                  playTracks(shuffled, 0)
                 }}>{t('common.shuffle')}</button>
               </>
             )}
@@ -142,7 +142,7 @@ export default function PlaylistView({ id }) {
               num={i + 1}
               contextIdx={i}
               isPlaying={currentTrackId === track.id}
-              onPlay={() => { setContextQueue(tracks); playFromContext(i) }}
+              onPlay={() => playTracks(tracks, i)}
               onLike={() => toggleLike(track)}
               onRemove={!playlist.is_system && token ? () => removeTrack(track.id) : undefined}
             />

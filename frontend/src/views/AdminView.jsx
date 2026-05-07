@@ -205,11 +205,10 @@ function TracksTab({ token }) {
   const [editingId, setEditingId] = useState(null)
   const [confirm, setConfirm] = useState(null)  // { msg, onOk }
   const { showToast } = useToast()
-  const { currentTrackId, playFromContext, setContextQueue } = usePlayer()
+  const { currentTrackId, playTracks } = usePlayer()
 
   function playAll(startIdx = 0) {
-    setContextQueue(tracks)
-    playFromContext(startIdx)
+    playTracks(tracks, startIdx)
   }
   const PAGE = 50
 
