@@ -4,7 +4,7 @@ import { useNav } from '../contexts/NavContext'
 import { usePlayer } from '../contexts/PlayerContext'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../contexts/ToastContext'
-import { apiFetch, fmtTime, formatAlbumArtists, updateAlbumCover, uploadCoverImage } from '../api.js'
+import { apiFetch, fmtTime, formatAlbumArtists, updateAlbumCover, updateAlbumDescription, uploadCoverImage } from '../api.js'
 import TrackRow from '../components/shared/TrackRow'
 import CoverArt from '../components/shared/CoverArt'
 import usePageRefresh from '../hooks/usePageRefresh'
@@ -19,6 +19,9 @@ export default function AlbumView({ id }) {
   const [loading, setLoading]   = useState(true)
   const [inLibrary, setInLibrary] = useState(false)
   const [coverUploading, setCoverUploading] = useState(false)
+  const [descEditing, setDescEditing] = useState(false)
+  const [descValue, setDescValue] = useState('')
+  const [descSaving, setDescSaving] = useState(false)
   const coverInputRef = useRef(null)
 
   const loadAlbum = useCallback(({ initial = false } = {}) => {
@@ -27,6 +30,7 @@ export default function AlbumView({ id }) {
     apiFetch('/rest/getAlbum?id=' + id, {}, token)
       .then(data => {
         setAlbum(data)
+        setDescValue(data.description || '')
         setTopbarTitle(data.title)
         setContextQueue(data.tracks || [])
         setLoading(false)
@@ -54,7 +58,7 @@ export default function AlbumView({ id }) {
     loadLibraryState()
   }, [loadLibraryState])
 
-  usePageRefresh(refreshAlbum, { enabled: Boolean(id) })
+  usePageRefresh(refreshAlbum, { enabled: Boolean(id) && !descEditing })
 
   async function toggleAlbumLibrary() {
     if (!token) { showToast(t('common.loginFirst')); return }
@@ -103,6 +107,34 @@ export default function AlbumView({ id }) {
       showToast(t('albums.coverUpdateFailed'))
     } finally {
       setCoverUploading(false)
+    }
+  }
+
+  function startDescriptionEdit() {
+    if (!token) { showToast(t('common.loginFirst')); return }
+    setDescValue(album?.description || '')
+    setDescEditing(true)
+  }
+
+  function cancelDescriptionEdit() {
+    setDescValue(album?.description || '')
+    setDescEditing(false)
+  }
+
+  async function saveDescription() {
+    if (!token) { showToast(t('common.loginFirst')); return }
+    setDescSaving(true)
+    try {
+      const updated = await updateAlbumDescription(id, descValue, token)
+      setAlbum(current => current ? { ...current, ...updated, tracks: current.tracks } : current)
+      setDescValue(updated.description || '')
+      setDescEditing(false)
+      showToast(t('albums.descriptionUpdated'))
+    } catch (err) {
+      console.error('Album description update failed', err)
+      showToast(t('albums.descriptionUpdateFailed'))
+    } finally {
+      setDescSaving(false)
     }
   }
 
@@ -161,6 +193,37 @@ export default function AlbumView({ id }) {
             >{albumArtistLine}</span>
             {year && <span> · {year}</span>}
             <span> · {t('albums.trackCount', { count: tracks.length })} · {fmtTime(totalDur)}</span>
+          </div>
+          <div className="album-description">
+            {descEditing ? (
+              <>
+                <textarea
+                  value={descValue}
+                  onChange={e => setDescValue(e.target.value)}
+                  placeholder={t('albums.descriptionPlaceholder')}
+                  rows={3}
+                  maxLength={1000}
+                  disabled={descSaving}
+                />
+                <div className="album-description-actions">
+                  <button type="button" className="btn-secondary" onClick={cancelDescriptionEdit} disabled={descSaving}>
+                    {t('common.cancel')}
+                  </button>
+                  <button type="button" className="btn-primary" onClick={saveDescription} disabled={descSaving}>
+                    {descSaving ? t('common.saving') : t('common.save')}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                {album.description && <div className="album-description-text">{album.description}</div>}
+                {token && (
+                  <button type="button" className="album-description-edit" onClick={startDescriptionEdit}>
+                    {album.description ? t('albums.editDescription') : t('albums.addDescription')}
+                  </button>
+                )}
+              </>
+            )}
           </div>
           <div className="detail-actions">
             <button className="btn-primary" onClick={() => playTracks(tracks, 0)}>

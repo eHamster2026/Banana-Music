@@ -297,6 +297,21 @@ body {
 .detail-type { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-secondary); margin-bottom: 8px; }
 .detail-title { font-size: 34px; font-weight: 800; letter-spacing: -0.7px; line-height: 1.1; margin-bottom: 8px; }
 .detail-meta { font-size: 14px; color: var(--text-secondary); margin-bottom: 22px; }
+.album-description { max-width: 760px; margin: -8px 0 20px; }
+.album-description-text { color: var(--text-secondary); font-size: 14px; line-height: 1.55; white-space: pre-wrap; }
+.album-description textarea {
+  width: 100%; min-height: 86px; resize: vertical; color: var(--text); background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 8px; padding: 10px 12px;
+  font: inherit; line-height: 1.45; outline: none;
+}
+.album-description textarea:focus { border-color: rgba(252,60,68,0.55); }
+.album-description textarea::placeholder { color: var(--text-secondary); }
+.album-description-actions { display: flex; gap: 10px; margin-top: 10px; }
+.album-description-edit {
+  margin-top: 4px; padding: 0; color: var(--accent); background: none; border: none;
+  font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.album-description-edit:hover { color: var(--accent-hover); }
 .detail-actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
 .detail-lib-btn {
   display: inline-flex; align-items: center; gap: 6px;

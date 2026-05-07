@@ -180,6 +180,11 @@
     "uploadCover": "上传封面",
     "coverUpdated": "封面已更新",
     "coverUpdateFailed": "封面上传失败",
+    "addDescription": "添加描述",
+    "editDescription": "编辑描述",
+    "descriptionPlaceholder": "写下这张专辑的描述...",
+    "descriptionUpdated": "描述已更新",
+    "descriptionUpdateFailed": "描述保存失败",
     "likeFailed": "操作失败"
   },
   "artists": {

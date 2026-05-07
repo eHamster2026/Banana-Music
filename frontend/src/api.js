@@ -78,6 +78,13 @@ export function updateAlbumCover(albumId, coverId, token) {
   }, token)
 }
 
+export function updateAlbumDescription(albumId, description, token) {
+  return apiFetch(`/rest/x-banana/albums/${encodeURIComponent(albumId)}/description`, {
+    method: 'PUT',
+    body: JSON.stringify({ description }),
+  }, token)
+}
+
 export function parseUploadMetadata(body, token, pluginId = 'llm-metadata') {
   return apiFetch(`/rest/x-banana/plugins/${encodeURIComponent(pluginId)}/parse-metadata`, {
     method: 'POST',

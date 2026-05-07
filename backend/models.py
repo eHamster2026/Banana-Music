@@ -92,6 +92,14 @@ class Album(Base):
         return f"/covers/{self.cover_path}"
 
     @property
+    def description(self) -> str | None:
+        value = (self.ext or {}).get("description")
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
+
+    @property
     def featured_artists(self) -> list:
         """参与创作的 featured 艺人列表（不含 artist_id 所指的主艺人）。"""
         return [aa.artist for aa in self.album_artists]

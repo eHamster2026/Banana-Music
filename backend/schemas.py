@@ -20,6 +20,7 @@ class AlbumBase(BaseModel):
     title: str
     art_color: str = "art-1"
     cover_url: Optional[str] = None
+    description: Optional[str] = None
     release_date: Optional[str] = None
     album_type: str = "album"
     ext: dict[str, Any] = Field(default_factory=dict)
@@ -38,6 +39,10 @@ class AlbumDetail(AlbumOut):
 
 class AlbumCoverUpdate(BaseModel):
     cover_id: str = Field(..., min_length=1)
+
+
+class AlbumDescriptionUpdate(BaseModel):
+    description: Optional[str] = None
 
 
 # ── Track ────────────────────────────────────────────

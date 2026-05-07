@@ -1231,4 +1231,27 @@ def update_album_cover(
     return album
 
 
+@x_banana.put("/albums/{album_id}/description", response_model=schemas.AlbumOut)
+def update_album_description(
+    album_id: int,
+    req: schemas.AlbumDescriptionUpdate,
+    db: Session = Depends(get_db),
+    _user: models.User = Depends(get_current_user),
+):
+    album = db.query(models.Album).filter(models.Album.id == album_id).first()
+    if not album:
+        raise HTTPException(404, "专辑不存在")
+
+    current = dict(album.ext or {})
+    text = (req.description or "").strip()
+    if text:
+        current["description"] = text
+    else:
+        current.pop("description", None)
+    album.ext = current
+    db.commit()
+    db.refresh(album)
+    return album
+
+
 router.include_router(x_banana)

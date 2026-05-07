@@ -180,6 +180,11 @@
     "uploadCover": "Upload cover",
     "coverUpdated": "Cover updated",
     "coverUpdateFailed": "Cover upload failed",
+    "addDescription": "Add description",
+    "editDescription": "Edit description",
+    "descriptionPlaceholder": "Write a description for this album...",
+    "descriptionUpdated": "Description updated",
+    "descriptionUpdateFailed": "Failed to save description",
     "likeFailed": "Action failed"
   },
   "artists": {
