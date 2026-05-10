@@ -1,13 +1,22 @@
 venv/
 backend/venv/
+backend/.venv/
+backend/backend/venv/
+**/.venv/
 __pycache__/
+**/__pycache__/
 *.py[cod]
 *.pyo
 backend/music.db
 backend/__pycache__/
 backend/routers/__pycache__/
+backend/.pytest_cache/
+backend/.ruff_cache/
 frontend/node_modules/
+frontend/.vite/
+frontend/test-results/
 # frontend/dist/ 需打入构建上下文，不能排除（docker build 前先 npm run build）
+data/
 resource/
 .git/
 .claude/
